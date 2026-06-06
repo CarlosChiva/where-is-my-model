@@ -1,0 +1,20 @@
+{
+  "name": "where-is-my-model-backend",
+  "version": "1.0.0",
+  "description": "Express + Mongoose API server for where-is-my-model GPU dashboard",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "seed": "node seed.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.21.0",
+    "mongoose": "^8.9.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.0"
+  }
+}

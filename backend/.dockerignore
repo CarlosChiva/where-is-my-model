@@ -1,0 +1,37 @@
+# ------------------------------------------------------------------
+# Dependency artifacts — installed by Dockerfile during build
+# ------------------------------------------------------------------
+
+node_modules
+
+# ------------------------------------------------------------------
+# Environment files — injected at runtime via docker-compose,
+# not baked into the image (prevents credential leakage)
+# ------------------------------------------------------------------
+
+.env*
+
+# ------------------------------------------------------------------
+# Seed data source — lives in project root, not needed in image
+#   (seed.js references ../data.json which is a host-only path)
+# ------------------------------------------------------------------
+
+# NOTE: seed.js is intentionally included. If database seeding is
+# required inside the container, run via Docker Compose exec:
+#   docker compose exec backend node seed.js
+
+# ------------------------------------------------------------------
+# Editor and OS artifacts
+# ------------------------------------------------------------------
+
+.DS_Store
+*.swp
+*.swo
+*~
+
+# ------------------------------------------------------------------
+# IDE directories (optional — exclude if team uses shared configs)
+# ------------------------------------------------------------------
+
+.vscode/
+.idea/

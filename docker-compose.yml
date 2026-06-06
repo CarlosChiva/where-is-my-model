@@ -1,0 +1,75 @@
+# ------------------------------------------------------------------
+# docker-compose.yml — where-is-my-model
+# Three services: frontend (Vite dev), backend (Express), mongo
+# Shared bridge network: app-network
+# ------------------------------------------------------------------
+
+version: "3.9"
+
+services:
+  # ------------------------------------------------------------------
+  # Frontend — Vite development server with hot module reload
+  # ------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      target: development
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+    environment:
+      - VITE_API_PROXY_TARGET=http://backend:8080
+    networks:
+      - app-network
+
+  # ------------------------------------------------------------------
+  # Backend — Express + Mongoose API server
+  # ------------------------------------------------------------------
+  backend:
+    build:
+      context: ./backend
+    ports:
+      - "9003:8080"
+    env_file:
+      - ./backend/.env.development
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+    depends_on:
+      mongo:
+        condition: service_healthy
+    networks:
+      - app-network
+
+  # ------------------------------------------------------------------
+  # MongoDB — persistent document store
+  # ------------------------------------------------------------------
+  mongo:
+    image: mongo:7
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - app-network
+
+# ------------------------------------------------------------------
+# Named volumes
+# ------------------------------------------------------------------
+volumes:
+  mongo-data:
+
+# ------------------------------------------------------------------
+# Networks
+# ------------------------------------------------------------------
+networks:
+  app-network:
+    driver: bridge
