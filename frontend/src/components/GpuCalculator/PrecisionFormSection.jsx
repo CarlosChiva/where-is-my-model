@@ -16,7 +16,7 @@ export default function PrecisionFormSection({ values = {}, onChange }) {
   const precisionOptions = [
     { label: 'float32 (4 bytes)', value: '4' },
     { label: 'bfloat16/float16 (2 bytes)', value: '2' },
-    { label: 'int8 (1 byte)', value: '1' },
+    { label: 'float8 (1 byte)', value: '1' },
     { label: 'int4 (0.5 bytes)', value: '0.5' },
   ];
 

@@ -48,8 +48,8 @@ None — entirely self-contained. No external or internal imports.
   - **Returns:** `{ valid: boolean, missing: string[] }`. `valid` is `true` iff `missing` has zero entries.
 
 - **`calculateModelSizeGB(num_parameters: number|string, dtype_bytes: number|string) → number | null`**
-  Estimates raw model-weight memory in gigabytes by multiplying parameter count by bytes-per-parameter and dividing by 1024³ (GiB for accuracy against real VRAM figures). Returns `null` if either input is invalid or non-positive.
-  - `num_parameters`: Total trainable parameters (e.g., `7_000_000_000` for a 7B model).
+  Estimates raw model-weight memory in gigabytes by multiplying parameter count by bytes-per-parameter and dividing by 1024³ (GiB for accuracy against real VRAM figures). Caller must provide absolute parameter count. The UI form collects billions and converts via multiplication by 1e9 before calling. Returns `null` if either input is invalid or non-positive.
+  - `num_parameters`: Total trainable parameters in absolute units (caller responsibility to convert from billions if needed; e.g., a user entering "7" in the UI becomes `7_000_000_000`).
   - `dtype_bytes`: Bytes per parameter — FP32→4, BF16/FP16→2, INT8→1, INT4→0.5.
   - **Returns:** Model weight size in GB rounded to 2 dp, or `null` if inputs are invalid.
 
@@ -227,3 +227,6 @@ Client-side form validation for the two primary data entities managed by the das
 
 ### T1 — calculatorEngine.js added (GPU Calculator)
 - Original addition of the calculation engine for VRAM estimation. Subsequently rewritten multiple times to support multi-architecture attention types and improved null-safety.
+
+### Verification against current source (2026-06-07)
+- **calculatorEngine.js** — Verified and re-documented. No functional changes detected since last documentation cycle. All exports (`REQUIRED_FIELDS_BY_TYPE`, `validateInput`, `validatePositive`, `validateRequiredFields`, `calculateModelSizeGB`, `calculateKvCachePerSeqGB` with 10-parameter signature, `calculateTotalKvCacheGB`, `getAvailableVram`, `getUsedVramWithPrefixCache`, `calculatePrefixCacheSavingsGB`, `getRemainingVram`, `getVramUsagePercent`), the private `_round()` helper, and all seven attention-architecture dispatch paths (MHA, GQA, MQA, MLA, MLA_ROPE, SWA, SWA_GLOBAL) remain consistent with source code. The null-safety contract (returning `null` rather than a silently wrong value on incomplete inputs) is confirmed intact.

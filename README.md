@@ -43,8 +43,7 @@ Estima cuánto consume un modelo en memoria GPU antes de desplegarlo. Soporta m�
 │   ├── server.js            # Entrypoint: conexión DB + registro de rutas
 │   ├── models/PC.js         # Schema multi-GPU con validadores
 │   ├── routes/              # pcs.js + services.js
-│   ├── middleware/          # Validación de bodies
-│   └── seed.js              # Carga datos de ejemplo desde data.json
+│   └─── middleware/          # Validación de bodies
 ├── docker-compose.yml       # 3 servicios: frontend, backend, mongo
 └── docs/                    # Documentación detallada del proyecto
 ```

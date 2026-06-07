@@ -228,6 +228,9 @@ Global CSS entry point for Tailwind CSS. Imports the three standard Tailwind dir
 - **Removed** the no-op function `const handleSave = () => {}` from `App.jsx`. This callback had previously been passed as `onSave={handleSave}` to the `<Header>` component. The Header's `handleExport()` method independently performs JSON serialization and download; this orphaned parent-level callback served no purpose.
 - **Removed** the `onSave` prop from the `<Header>` JSX rendering in `App.jsx`. The `<Header>` now receives four props: `currentPage`, `onPageChange`, `pcs`, and `onAddPc`.
 
+### Verification of child docs (2026-06-07)
+- **utils/ subfolder** — Re-verified. Child documentation (`./src/utils.md`) was updated to confirm calculatorEngine.js source code alignment. All documented exports, validation helpers, and attention-architecture dispatch paths remain accurate.
+
 ---
 
 ## Cross-cutting patterns

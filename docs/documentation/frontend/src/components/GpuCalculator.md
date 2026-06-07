@@ -260,6 +260,14 @@ Displays the GPU VRAM calculation results with visual bars, colour coding (green
 
 ---
 
+## 🔄 Changes in this update
+
+### Verification against current source (2026-06-07)
+- **ModelFormSection.jsx** — Verified and re-documented. No functional changes detected since last documentation cycle. All seven attention-type variants (MHA, GQA, MQA, MLA, MLA_ROPE, SWA, SWA_GLOBAL), the `renderInput` helper, conditional field rendering, validation banner logic, and props contract (`values`, `onChange`) remain consistent with source code.
+- **GPUCalculatorPage.jsx** — Verified and re-documented. No functional changes detected since last documentation cycle. The state management pattern (`DEFAULT_STATE`, `handleChange`, `handleReset`), derived computation pipeline (8 calculator functions), and rendering layout (4-form-section grid + sticky ResultsDisplay sidebar) remain consistent with source code.
+
+---
+
 ## Architecture overview and data flow
 
 ```

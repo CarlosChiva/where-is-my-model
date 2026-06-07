@@ -23,7 +23,7 @@ const DEFAULT_STATE = {
   num_key_value_heads:    '8',
   head_dim:               '128',
   hidden_size:            '4096',
-  num_parameters:         '7000000000',
+  num_parameters:         '7',
   // Attention architecture
   attention_type:         'GQA',
   kv_lora_rank:           '512',
@@ -43,6 +43,16 @@ const DEFAULT_STATE = {
   avg_prompt_len:         '256',
   avg_output_len:         '1024',
   prefix_cache_hit_ratio: '0.5',
+  // DEFAULT_STATE — añadir:
+sliding_window_pattern:     '6',
+num_global_key_value_heads: '4',
+global_head_dim:            '512',
+attention_k_eq_v:           false,
+num_attention_layers:       '16',
+deltanet_num_heads:         '16',
+deltanet_head_dim:          '256',
+
+
 };
 
 export default function GPUCalculatorPage() {
@@ -55,23 +65,33 @@ export default function GPUCalculatorPage() {
   const handleReset = () => setFormState({ ...DEFAULT_STATE });
 
   /* ═══  Derived results ═══ */
+  const BILLIONS_FACTOR = 1e9;
+
   const modelSizeGB     = calculateModelSizeGB(
-    formState.num_parameters,
+    Number(formState.num_parameters) * BILLIONS_FACTOR,
     formState.dtype_bytes,
   );
 
-  const kvCachePerSeqGB = calculateKvCachePerSeqGB(
-    formState.num_hidden_layers,
-    formState.num_key_value_heads,
-    formState.head_dim,
-    formState.max_model_len,
-    formState.kv_cache_dtype_bytes,
-    formState.attention_type,
-    formState.kv_lora_rank,
-    formState.qk_rope_head_dim,
-    formState.sliding_window,
-    formState.num_sliding_layers,
-  );
+// Llamada a calculateKvCachePerSeqGB — pasar los nuevos args:
+const kvCachePerSeqGB = calculateKvCachePerSeqGB(
+  formState.num_hidden_layers,
+  formState.num_key_value_heads,
+  formState.head_dim,
+  formState.max_model_len,
+  formState.kv_cache_dtype_bytes,
+  formState.attention_type,
+  formState.kv_lora_rank,
+  formState.qk_rope_head_dim,
+  formState.sliding_window,
+  formState.num_sliding_layers,
+  formState.sliding_window_pattern,
+  formState.num_global_key_value_heads,
+  formState.global_head_dim,
+  formState.attention_k_eq_v,
+  formState.num_attention_layers,
+  formState.deltanet_num_heads,
+  formState.deltanet_head_dim,
+);
 
   const totalKvCacheGB  = calculateTotalKvCacheGB(
     kvCachePerSeqGB,
