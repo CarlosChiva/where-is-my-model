@@ -1,137 +1,158 @@
 # `services`
 
-> Path: `frontend/src/services/`
-> Last updated: 2026-06-04
+> Path: `frontend/src/services`
+> Last updated: 2026-06-07
 > Type: Leaf folder
 
-API client layer for the GPU Infrastructure Dashboard frontend. Contains a generic HTTP request wrapper (`apiClient.js`) that standardizes JSON serialization, error handling, and response parsing, plus two domain-specific API modules (`pcApi.js` for server CRUD, `serviceApi.js` for per-server service CRUD) that thin-wrap `apiClient` with REST endpoint routing. All functions return the uniform `{ data, error }` envelope used by the custom hooks layer.
+General purpose client-side service layer for the frontend application. This folder encapsulates all HTTP communication with the backend API, providing a lightweight fetch-based client (`apiClient`) and two domain-specific API wrappers (`pcApi` for PC management and `serviceApi` for service/lifecycle management). Together they form the data-access boundary of the frontend.
 
 ---
 
 ## 📄 `apiClient.js`
 
-Low-level HTTP request wrapper providing a unified interface for all API communication. Handles Content-Type negotiation, automatic JSON body serialization, response parsing, and consistent error envelope `{ data, error }` for every outcome (success, HTTP error, or network failure).
-
-### Constants
-
-| Constant | Value | Purpose |
-|----------|-------|---------|
-| `API_BASE` | `'/api'` | Base URL prefix prepended to every endpoint path; the backend is proxied under `/api` by Vite's dev server. |
-
-### Internal functions
-
-- **`_request(url: string, options: RequestInit) → Promise<{ data, error }>`**
-  Core HTTP request executor. Wraps the native `fetch` API with automatic JSON handling.
-  - `url`: The fully-qualified URL (prepended with `API_BASE`).
-  - `options`: Standard `fetch` options (method, body, headers, etc.).
-  - **Returns:** A Promise resolving to `{ data, error }`:
-    - On success: `{ data: <parsed JSON or null>, error: null }`
-    - On HTTP error (non-2xx): `{ data: null, error: <message from body or "HTTP <status>"> }`
-    - On network error: `{ data: null, error: <err.message> }`
-  - **Content-Type handling:** Sets `Content-Type: application/json` automatically unless already present.
-  - **Body serialization:** If `options.body` is an object (not a string), it is serialized via `JSON.stringify()`.
-  - **Response parsing:** For JSON responses with status 2xx, extracts `response.json().data ?? response.json()`. For 204 or empty responses, returns `{ data: null, error: null }`.
+Low-level HTTP request wrapper built on top of the browser's native `fetch` API. Normalizes headers, body serialization, error handling, and response parsing into a uniform `{ data, error }` shape so callers never need to deal with raw `Response` objects. Does not import any external modules — only uses global browser APIs (`Headers`, `fetch`).
 
 ### Functions
 
-- **`get(endpoint: string) → Promise<{ data, error }>`**
-  Issues a GET request to `${API_BASE}${endpoint}`.
-  - `endpoint`: The REST path (e.g., `'/pcs'`).
-  - **Returns:** `{ data, error }` envelope from `_request`.
+- **`_request(url: string, options: RequestInit) → Promise<{ data: any | null, error: string | null }>`** *(private / internal)*
+  Core async function that performs the actual HTTP call. Applies a default JSON content type, stringifies non-string request bodies, and normalizes both successful and failed responses into a consistent `{ data, error }` envelope.
+  - `url`: full URL (including the `/api` base path) to call.
+  - `options`: standard `fetch` options object (`method`, `body`, etc.).
+  - **Returns:** a Promise resolving to an object with `data` (parsed JSON or `null`) and `error` (status text / error message or `null`).
 
-- **`post(endpoint: string, body: Object) → Promise<{ data, error }>`**
-  Issues a POST request to `${API_BASE}${endpoint}` with the given body.
-  - `endpoint`: The REST path (e.g., `'/pcs'`).
-  - `body`: The data object to send (auto-serialized to JSON).
-  - **Returns:** `{ data, error }` envelope from `_request`.
+- **`get(endpoint: string) → Promise<{ data: any | null, error: string | null }>`** *(exported)*
+  Convenience wrapper for HTTP GET. Prepends the `/api` base to the given relative `endpoint`.
+  - `endpoint`: relative path (e.g. `/pcs`, `/tokens`).
+  - **Returns:** same `{ data, error }` envelope as `_request`.
 
-- **`put(endpoint: string, body: Object) → Promise<{ data, error }>`**
-  Issues a PUT request to `${API_BASE}${endpoint}` with the given body.
-  - `endpoint`: The REST path (e.g., `'/pcs/{id}'`).
-  - `body`: The data object to send (auto-serialized to JSON).
-  - **Returns:** `{ data, error }` envelope from `_request`.
+- **`post(endpoint: string, body: any) → Promise<{ data: any | null, error: string | null }>`** *(exported)*
+  Convenience wrapper for HTTP POST. Prepends `/api`, sets JSON content type, and sends `body`.
+  - `endpoint`: relative path to create a resource at.
+  - `body`: payload object (auto-serialized to JSON by `_request`).
+  - **Returns:** same `{ data, error }` envelope.
 
-- **`del(endpoint: string) → Promise<{ data, error }>`**
-  Issues a DELETE request to `${API_BASE}${endpoint}`.
-  - `endpoint`: The REST path (e.g., `'/pcs/{id}'`).
-  - **Returns:** `{ data, error }` envelope from `_request`.
+- **`put(endpoint: string, body: any) → Promise<{ data: any | null, error: string | null }>`** *(exported)*
+  Convenience wrapper for HTTP PUT / full resource replacement.
+  - `endpoint`: relative path to the target resource.
+  - `body`: updated payload object.
+  - **Returns:** same `{ data, error }` envelope.
+
+- **`del(endpoint: string) → Promise<{ data: any | null, error: string | null }>`** *(exported)*
+  Convenience wrapper for HTTP DELETE.
+  - `endpoint`: relative path to the resource to remove.
+  - **Returns:** same `{ data, error }` envelope.
+
+### Constants
+
+| Constant   | Value     | Description                                      |
+|------------|-----------|--------------------------------------------------|
+| `API_BASE` | `/api`    | Base URL prefix prepended to every request path. |
 
 ---
 
 ## 📄 `pcApi.js`
 
-Thin wrapper around `apiClient` for GPU server (PC) CRUD operations. Maps each function to its corresponding REST endpoint under `/pcs`.
+Domain-level API functions for managing "PC" (personal computer / device) entities. Each function delegates to the corresponding method on `apiClient`. All RPCs target the `/pcs` resource group on the backend.
 
 ### Imports and dependencies
 
-| Module | Imported elements | Type |
-|--------|-------------------|------|
-| `./apiClient` | `get`, `post`, `put`, `del` | Internal |
+| Module          | Imported elements       | Type      |
+|-----------------|-------------------------|-----------|
+| `./apiClient`   | `get`, `post`, `put`, `del` | Internal |
 
 ### Functions
 
-- **`fetchPcs() → Promise<{ data: Array, error }>`**
-  Fetches the complete list of GPU servers.
-  - **Endpoint:** `GET /api/pcs`
-  - **Returns:** `{ data, error }` envelope.
+- **`fetchPcs() → Promise<{ data: any | null, error: string | null }>`** *(exported)*
+  Retrieves the full list of PCs from the backend.
+  - **Returns:** `{ data, error }` where `data` is the list of PC objects (or whatever the server returns).
 
-- **`createPc(data: Object) → Promise<{ data, error }>`**
-  Creates a new GPU server.
-  - `data`: Server data object (`{ nombre, ip, vram, servicios? }`).
-  - **Endpoint:** `POST /api/pcs`
-  - **Returns:** `{ data, error }` envelope.
+- **`createPc(data: any) → Promise<{ data: any | null, error: string | null }>`** *(exported)*
+  Creates a new PC resource on the backend.
+  - `data`: payload containing the fields for the new PC.
+  - **Returns:** `{ data, error }` with the created resource or an error message.
 
-- **`updatePc(id: string, data: Object) → Promise<{ data, error }>`**
-  Updates an existing GPU server by ID.
-  - `id`: MongoDB ObjectId of the server.
-  - `data`: Updated server data object.
-  - **Endpoint:** `PUT /api/pcs/{id}`
-  - **Returns:** `{ data, error }` envelope.
+- **`updatePc(id: string | number, data: any) → Promise<{ data: any | null, error: string | null }>`** *(exported)*
+  Updates an existing PC identified by `id`.
+  - `id`: unique identifier of the PC to update.
+  - `data`: updated fields payload.
+  - **Returns:** `{ data, error }` with the updated resource or an error message.
 
-- **`deletePc(id: string) → Promise<{ data, error }>`**
-  Deletes a GPU server by ID.
-  - `id`: MongoDB ObjectId of the server.
-  - **Endpoint:** `DELETE /api/pcs/{id}`
-  - **Returns:** `{ data, error }` envelope.
+- **`deletePc(id: string | number) → Promise<{ data: any | null, error: string | null }>`** *(exported)*
+  Deletes a PC identified by `id`.
+  - `id`: unique identifier of the PC to delete.
+  - **Returns:** `{ data, error }` (data is typically `null` for deletions).
 
 ---
 
 ## 📄 `serviceApi.js`
 
-Thin wrapper around `apiClient` for AI service CRUD operations on a specific GPU server. Maps each function to its corresponding REST endpoint under `/pcs/{pcId}/services`.
+Domain-level API functions for managing "services" associated with a specific PC. Each RPC targets the `/pcs/{pcId}/services` sub-resource on the backend. A service is identified within its parent PC by a positional `index` rather than an independent UUID.
 
 ### Imports and dependencies
 
-| Module | Imported elements | Type |
-|--------|-------------------|------|
-| `./apiClient` | `get`, `post`, `put`, `del` | Internal |
+| Module          | Imported elements       | Type      |
+|-----------------|-------------------------|-----------|
+| `./apiClient`   | `get`, `post`, `put`, `del` | Internal |
 
 ### Functions
 
-- **`fetchServices(pcId: string) → Promise<{ data: Array, error }>`**
-  Fetches all AI services running on a specific GPU server.
-  - `pcId`: MongoDB ObjectId of the parent server.
-  - **Endpoint:** `GET /api/pcs/{pcId}/services`
-  - **Returns:** `{ data, error }` envelope.
+- **`fetchServices(pcId: string | number) → Promise<{ data: any | null, error: string | null }>`** *(exported)*
+  Retrieves the list of services belonging to a given PC.
+  - `pcId`: identifier of the parent PC.
+  - **Returns:** `{ data, error }` where `data` is the list of service objects.
 
-- **`createService(pcId: string, data: Object) → Promise<{ data, error }>`**
-  Adds a new AI service to a GPU server.
-  - `pcId`: MongoDB ObjectId of the parent server.
-  - `data`: Service data object (`{ nombre, puerto, gpu }`).
-  - **Endpoint:** `POST /api/pcs/{pcId}/services`
-  - **Returns:** `{ data, error }` envelope.
+- **`createService(pcId: string | number, data: any) → Promise<{ data: any | null, error: string | null }>`** *(exported)*
+  Creates a new service under the specified PC.
+  - `pcId`: identifier of the parent PC.
+  - `data`: payload describing the new service.
+  - **Returns:** `{ data, error }` with the created resource or an error message.
 
-- **`updateService(pcId: string, index: number, data: Object) → Promise<{ data, error }>`**
-  Updates an existing service at the given index on a GPU server.
-  - `pcId`: MongoDB ObjectId of the parent server.
-  - `index`: Array index of the service in the `servicios` array.
-  - `data`: Updated service data object.
-  - **Endpoint:** `PUT /api/pcs/{pcId}/services/{index}`
-  - **Returns:** `{ data, error }` envelope.
+- **`updateService(pcId: string | number, index: number, data: any) → Promise<{ data: any | null, error: string | null }>`** *(exported)*
+  Updates a service at position `index` within the given PC's service list.
+  - `pcId`: identifier of the parent PC (appears in two positions on the call stack — once here and once in the URL path).
+  - `index`: positional index of the service to update (integer).
+  - `data`: updated fields payload.
+  - **Returns:** `{ data, error }` with the updated resource or an error message.
 
-- **`deleteService(pcId: string, index: number) → Promise<{ data, error }>`**
-  Removes a service at the given index from a GPU server.
-  - `pcId`: MongoDB ObjectId of the parent server.
-  - `index`: Array index of the service in the `servicios` array.
-  - **Endpoint:** `DELETE /api/pcs/{pcId}/services/{index}`
-  - **Returns:** `{ data, error }` envelope.
+- **`deleteService(pcId: string | number, index: number) → Promise<{ data: any | null, error: string | null }>`** *(exported)*
+  Deletes a service at position `index` within the given PC's service list.
+  - `pcId`: identifier of the parent PC.
+  - `index`: positional index of the service to remove.
+  - **Returns:** `{ data, error }` (data is typically `null` for deletions).
+
+---
+
+## Inter-file relationships
+
+```
+┌─────────────────────┐
+│    apiClient.js     │  ← low-level HTTP wrapper
+│  (get / post/put/del)│
+└────────┬────────────┘
+         │ imported by
+   ┌─────┴──────┐
+   │            │
+   ▼            ▼
+┌─────────┐ ┌──────────────┐
+│ pcApi.js│ │serviceApi.js │  ← domain-specific CRUD layer
+└─────────┘ └──────────────┘
+```
+
+- `apiClient.js` is the **foundation**: zero external imports, pure-fetch abstraction.
+- `pcApi.js` and `serviceApi.js` are **thin wrappers** that map domain concepts (PCs, Services) onto REST endpoints via `apiClient`. They add no extra logic beyond URL composition.
+- Neither domain module depends on the other; both depend exclusively on `apiClient`.
+
+---
+
+## API surface summary
+
+| Endpoint pattern                | Method   | pcApi / serviceApi function  |
+|---------------------------------|----------|-----------------------------|
+| `/pcs`                          | GET      | `fetchPcs()`                |
+| `/pcs`                          | POST     | `createPc(data)`            |
+| `/pcs/:id`                      | PUT      | `updatePc(id, data)`        |
+| `/pcs/:id`                      | DELETE   | `deletePc(id)`              |
+| `/pcs/:pcId/services`           | GET      | `fetchServices(pcId)`       |
+| `/pcs/:pcId/services`           | POST     | `createService(pcId, data)` |
+| `/pcs/:pcId/services/:index`    | PUT      | `updateService(pcId, index, data)` |
+| `/pcs/:pcId/services/:index`    | DELETE   | `deleteService(pcId, index)`

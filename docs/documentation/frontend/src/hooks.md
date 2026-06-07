@@ -1,7 +1,7 @@
 # `hooks`
 
 > Path: `frontend/src/hooks/`
-> Last updated: 2026-06-04
+> Last updated: 2026-06-07
 > Type: Leaf folder
 
 Custom React hooks for the GPU Infrastructure Dashboard frontend. Provides data-fetching hooks for loading the master list of GPU servers (`usePcs`) and per-server services (`useServices`), plus six mutation hooks for CRUD operations on PCs and services (create, update, delete). All hooks follow a consistent pattern: they manage `loading` and `error` state, expose an `onSuccess` callback for side effects, and return a simple object with reactive state and a mutation function.
@@ -231,6 +231,14 @@ Mutation hook for editing a service on a GPU server. Calls the `updateService` A
 
   - **`clearError() → void`**
     Resets the `error` state to `null`. Used by parent components (e.g., `EditServiceModal`) to dismiss stale API error messages when the modal reopens or the user takes action.
+
+---
+
+### T12 — Re-read and verification pass (2026-06-07)
+
+- Re-read all 8 source files in `frontend/src/hooks/` to verify documentation accuracy.
+- Confirmed that signatures, return types, imports, and behavioral descriptions match the current codebase with no drift.
+- No structural or functional changes detected since last update.
 
 ---
 

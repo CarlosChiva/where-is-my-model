@@ -6,7 +6,7 @@ const METRIC_ROWS = [
   { label: 'Total KV Cache',       key: 'totalKvCacheGB',       unit: 'GB' },
   { label: 'Available VRAM',       key: 'availableVramGB',      unit: 'GB', showBar: false },
   { label: 'Used VRAM (effective)', key: 'usedVramGB',          unit: 'GB' },
-  { label: 'Remaining VRAM',       key: 'remainingVramGB',      unit: 'GB' },
+  { label: 'Remaining VRAM',       key: 'remainingVramGB',      unit: 'GB', invertColor: true },
   { label: 'Prefix Cache Savings', key: 'prefixCacheSavingsGB', unit: 'GB', showBar: false },
 ];
 
@@ -113,7 +113,7 @@ export default function ResultsDisplay({ results, missingFields = [] }) {
 
       {/* ── Metric rows ── */}
       <div className="space-y-4">
-        {METRIC_ROWS.map(({ label, key, unit, showBar }) => {
+        {METRIC_ROWS.map(({ label, key, unit, showBar, invertColor }) => {
           const value = data[key];
           const isNull = value === null || value === undefined;
 
@@ -141,7 +141,7 @@ export default function ResultsDisplay({ results, missingFields = [] }) {
                     aria-valuenow={Math.round(barPercent)}
                     aria-valuemin="0"
                     aria-valuemax="100"
-                    className={`absolute inset-y-0 left-0 h-full ${getGpuColorClass(barPercent)} animate-gpu-fill`}
+                    className={`absolute inset-y-0 left-0 h-full ${getGpuColorClass(invertColor ? 100 - barPercent : barPercent)} animate-gpu-fill`}
                     style={{ '--gpu-target-width': `${barPercent}%` }}
                   />
                 </div>

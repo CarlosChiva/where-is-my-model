@@ -1,7 +1,7 @@
 # `middleware`
 
 > Path: `backend/middleware/`
-> Last updated: 2026-06-05
+> Last updated: 2026-06-07
 > Type: Leaf folder
 
 Request validation middleware for the Express backend. Provides middleware functions used as route handlers on PC creation/update and service creation/update endpoints. All validators follow a collect-all-errors pattern (rather than fail-fast) and return a single 400 response with an `errors` array when validation fails. A legacy fallback auto-transforms a scalar `vram` field into the new `gpus` array format for backward compatibility.

@@ -1,7 +1,7 @@
 # `routes`
 
 > Path: `backend/routes/`
-> Last updated: 2026-06-05
+> Last updated: 2026-06-07
 > Type: Leaf folder
 
 Express route modules for the API server. Each file exports a single `express.Router()` instance with RESTful endpoints, unified error handling, and standardized `{ success, data? }` response envelopes.

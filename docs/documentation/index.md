@@ -1,69 +1,206 @@
-# Project Documentation Index
+# Root — Where Is My Model
 
-> Auto-generated — last updated: 2026-06-04
->
-> ## 🔄 Changes in this update
->
-> - Updated `css` entry: marked as **REMOVED** — legacy CSS partials deleted in commit `9724cfb` (Task T15). Documentation preserved as historical reference.
-> - Updated `js` entry: marked as **REMOVED** — legacy vanilla JS modules deleted in commit `9724cfb` (Task T15). Documentation preserved as historical reference.
-> - Updated `where-is-my-model` entry: removed references to legacy `index.html`; clarified that the active frontend is React + Vite in `frontend/`.
-> - Updated Quick usage guide: removed all references to deleted legacy files (`index.html`, `css/*`, `js/*`); redirected business logic and entry point references to the React frontend.
-> - Added entry for `frontend-components-phase4.md` (7 React components: Header, GPUBar, GPUDetails, ServiceRow, PCCard, PCGrid, App.jsx) to the Module Map table.
-> - Updated backend entry description to mention global error handler middleware that catches JSON parse errors, CastError exceptions, ValidationError exceptions, and unknown errors.
-> - Updated backend entry description to mention integration test scripts (`test-gpu-cap.sh`, `test-gpu-cap.js`) for GPU VRAM capacity validation.
-> - Updated backend entry description: removed references to `autoSeedOnEmpty()` on-startup auto-seeding; clarified that database initialization is handled exclusively by `seed.js`. The server no longer imports `fs`, `url`, or `path` modules and no longer computes `__dirname`/`__filename` ESM helpers.
+> Path: `/`
+> Last updated: 2026-06-07
+> Type: Composite folder (project root)
+
+**Where Is My Model** is a full-stack web application that serves as a GPU infrastructure dashboard for catalogueing multi-GPU compute servers running AI inference services. The frontend lets operators see real-time VRAM occupancy via colour-coded progress bars, manage server and service inventories through CRUD operations in modal dialogs, and estimate VRAM budgets for loading large language models using an interactive calculator with seven attention-architecture variants. The backend enforces per-GPU VRAM capacity constraints at three levels (schema validator, request-body middleware, route error handling) and persists all state to MongoDB. The entire stack is containerised and orchestrated by a single `docker-compose.yml` file that brings up three services on a shared Docker bridge network: Vite dev server (frontend), Express API (backend), and MongoDB (data store).
 
 ---
 
-## 🗺️ Module Map
+## 📁 Subfolders
 
-| Module | Path | Description |
-|--------|------|-------------|
-| [css](./css.md) | `css/` | **REMOVED** — Legacy CSS partials for the flat HTML prototype. Previously: `styles.css` (master entry), `base.css` (reset, theme, typography), `layout.css` (page structure, responsive grid), `components.css` (widgets, dialogs, forms), `animations.css` (card entrance, GPU bar fill, warning pulse). All deleted in commit `9724cfb`. |
-| [backend](./backend.md) | `backend/` | Express API server for the GPU dashboard. `server.js` bootstraps the app with CORS and JSON middleware, connects to MongoDB via Mongoose (failing fast on error), exposes a `/api/health` endpoint, and lazily registers route modules (`services`, then `pcs`) after DB connectivity is confirmed. No automatic seeding on startup; database initialization is handled exclusively by `seed.js`. Includes a global error handler middleware that catches JSON parse errors, CastError exceptions, ValidationError exceptions, and unknown errors. `.env.development` provides local configuration. Subfolder `models/` contains the Mongoose `PC` schema with embedded service subdocuments, VRAM-capacity validators, and automatic timestamps. `seed.js` populates MongoDB from `data.json` with destructive idempotency (drops then re-seeds). Two integration test scripts (`test-gpu-cap.sh` for Bash/curl, `test-gpu-cap.js` for Node.js/fetch) verify GPU VRAM capacity validation end-to-end. Containerized via a single-stage Dockerfile (`node:20-alpine`, two-layer caching strategy) with `.dockerignore` that excludes `node_modules`, `.env*`, and editor artifacts — designed for Docker Compose orchestration alongside frontend and MongoDB services. |
-| [js](./js.md) | `js/` | **REMOVED** — Legacy vanilla JavaScript modules for the flat HTML prototype. Previously: `models.js` (Service, PC classes), `data.js` (loading, normalization, persistence), `views.js` (rendering layer, 13 functions), `editors.js` (dialog management, CRUD, event wiring), `app.js` (bootstrap). All deleted in commit `9724cfb`. |
-| [where-is-my-model](./where-is-my-model.md) | `/` | Repository root containing `data.json` (GPU infrastructure schema with 3 servers / 8 services) and `docker-compose.yml` (orchestration for frontend + backend + mongo). Legacy `index.html`, `css/`, and `js/` removed in commit `9724cfb`. Active frontend is the React + Vite application in `frontend/`. |
-| [docker](./docker.md) | `docker-compose.yml` | Docker Compose orchestration defining three services (frontend, backend, mongo) on a shared bridge network `app-network` with health checks, named volume `mongo-data` for persistence, and dependency-ordered startup (mongo → backend → frontend). Frontend runs Vite on host port 3000 with env var `VITE_API_PROXY_TARGET=http://backend:8080` to route `/api` requests internally to the backend container. Backend maps host port 9003 to container port 8080 and loads `backend/.env.development` via `env_file`. Mongo uses `mongo:7` image with `mongosh` health check, no host port exposed. |
-| [frontend](./frontend.md) | `frontend/` | React + Vite frontend for the GPU dashboard: `vite.config.js` configures dev server on port 3000 with `/api` proxy targeting `process.env.VITE_API_PROXY_TARGET` (fallback `http://backend:8080`); `.env` and `.env.development` provide runtime-configurable proxy targets for Docker Compose and local development environments respectively (12-factor principle); `index.html` serves as the HTML entry point with branded title "Where is My Model — GPU Dashboard" and Google Fonts preconnect/preload (Spectral, JetBrains Mono); `nginx.conf` configures production nginx server serving static SPA assets with security headers (`X-Frame-Options DENY`, `X-Content-Type-Options nosniff`, `X-XSS-Protection`), gzip compression, 1-year immutable cache for versioned files, `index.html` no-cache policy, SPA fallback via `try_files`, and reverse proxy for `/api` to backend with WebSocket upgrade support (`map $http_upgrade $connection_upgrade`); `Dockerfile` is multi-stage (development `node:20-alpine`, build `node:20-alpine`, production `nginx:alpine`) with volume mount integration and `--host` binding; `.dockerignore` excludes build artifacts, `.env*`, and IDE files; `build.sourcemap: false` disables production source maps; subfolder `src/` holds React source files (`main.jsx`, `App.jsx`, `index.css`). |
-| [frontend-components-phase4](./frontend-components-phase4.md) | `frontend/src/components/` + `frontend/src/App.jsx` | Seven React components (Header, GPUBar, GPUDetails, ServiceRow, PCCard, PCGrid, App.jsx) constituting Phase 4 of the GPU dashboard migration to React + Vite + Tailwind CSS — presentational pattern with unidirectional data flow, callback bubbling, and modal state routing. |
+| Folder | Documentation | Description |
+|--------|--------------|-------------|
+| `backend/` | [see docs](./backend/Backend.md) | Express + Mongoose REST API with per-GPU VRAM capacity enforcement, multi-GPU schema support, request-body validation middleware, and integration tests. |
+| `frontend/src/` | [see docs](./frontend/src/Src.md) | React + Vite single-page application with Tailwind CSS, custom hooks for all CRUD mutations, modal orchestrator, GPU calculator engine, and shared colour-coding utilities. |
 
 ---
 
-## 📋 Quick usage guide for agents
+## 📄 Direct files
 
-> Section designed for LLM agents to quickly locate the part of the code
-> they need without reading all the documentation.
+### `docker-compose.yml`
 
-### What does this repository do?
-Full-stack dashboard for visualizing and editing distributed GPU server infrastructure. The active frontend is a React + Vite application with Tailwind CSS in `frontend/`. The backend is an Express + MongoDB API server in `backend/`. The application loads infrastructure data from `data.json`, renders interactive server cards, and allows CRUD operations via accessible modal dialogs. Docker Compose orchestrates frontend, backend, and MongoDB containers.
+Single-file Docker Compose orchestration that brings up the entire three-service stack on a shared `app-network` bridge network. Defines explicit startup ordering with health-check dependencies so that the backend does not start until MongoDB is healthy, and the frontend waits for the backend to be available.
 
-### How to navigate this documentation
-Start here. Each entry in the Module Map is a top-level folder. Follow its link to see its direct files and subfolders. The root module documents `data.json` (the infrastructure data schema). The `frontend/` module documents the React application. The `backend/` module documents the Express API server. Legacy `css/` and `js/` entries are marked as **REMOVED** (historical reference only).
+### Composition overview
 
-### Where is the business logic?
-- **[frontend — React components](./frontend-components-phase4.md)** — Seven React components (Header, GPUBar, GPUDetails, ServiceRow, PCCard, PCGrid, App.jsx) implementing the dashboard UI with unidirectional data flow, callback bubbling, and modal state routing.
-- **[backend — routes and models](./backend.md)** — Express API with MongoDB backend. Mongoose `PC` schema with embedded service subdocuments, VRAM-capacity validators. REST routes for CRUD operations.
-- **[frontend — hooks](./frontend/src/hooks.md)** — Custom React hooks for data fetching and state management.
-- **[frontend — utils](./frontend/src/utils.md)** — Shared utility functions.
-- **Legacy JS (REMOVED)** — The `js/` folder previously contained vanilla JS business logic (`models.js`, `data.js`, `views.js`, `editors.js`, `app.js`). Deleted in commit `9724cfb`. See [js.md](./js.md) for historical reference.
+| Service | Image / Build context | Host port | Container port | Depends on | Key configuration |
+|---------|----------------------|-----------|----------------|------------|-------------------|
+| `frontend` | `./frontend` (multi-stage, `development` target) | `3000` → `3000` | Vite dev server + HMR | `backend` (service ready) | Volume mount `./frontend:/app` for live-reload; named volume `/app/node_modules` to avoid host-node-modules conflict; `VITE_API_PROXY_TARGET=http://backend:8080` env var for API proxy |
+| `backend` | `./backend` (Node 20 Alpine) | `9003` → `8080` | Express on port 8080 | `mongo` (`service_healthy`) | Loads `./backend/.env.development`; volume mount `./backend:/app` for live-reload; named volume `/app/node_modules` |
+| `mongo` | `mongo:7` (official) | — (internal only, not exposed to host) | 27017 | — | Health check via `mongosh --eval "db.adminCommand('ping')"` with 10 s interval, 5 s timeout, 5 retries, 10 s start period; persistent volume `mongo-data:/data/db` |
 
-### Where are the models or data structures?
-- **[where-is-my-model — `data.json`](./where-is-my-model.md)** defines the JSON schema with server identifiers, IPs, services, ports, and GPU consumption percentages.
-- **[backend — `models/PC.js`](./backend/models.md)** defines the Mongoose `PC` schema (MongoDB ODM) with embedded service subdocuments, VRAM-capacity validation, and automatic timestamps.
-- **[frontend — React components](./frontend-components-phase4.md)** contain TypeScript/JavaScript interfaces and prop types for the dashboard data model.
-- **Legacy `js/models.js` (REMOVED)** — Previously defined `Service` and `PC` ES6 classes. Deleted in commit `9724cfb`. See [js.md](./js.md) for historical reference.
+### Startup ordering guarantee
 
-### Where are the entry points?
-- **[frontend — `frontend/index.html`](./frontend.md)** is the React application HTML entry point. Serves the root element for React hydration. Loads Google Fonts (Spectral, JetBrains Mono).
-- **[frontend — `src/main.jsx`](./frontend/src.md)** is the React bootstrap file. Renders the `<App />` component into the DOM.
-- **[frontend — `src/App.jsx`](./frontend-components-phase4.md)** is the root React component, orchestrating the dashboard layout (Header, PCGrid, modals).
-- **[backend — `server.js`](./backend.md)** is the Node.js/Express server entry point. Loads `.env.development`, configures CORS and JSON middleware, registers health check at `/api/health`, connects to MongoDB via Mongoose, dynamically imports route modules, and listens on port 8080.
-- **[backend — `seed.js`](./backend.md)** is the database seeding entry point. Run `node backend/seed.js` to populate MongoDB from `data.json`.
-- **[backend — `test-gpu-cap.sh`](./backend.md)** and [`test-gpu-cap.js`](./backend.md) are GPU VRAM capacity validation integration tests.
-- **Legacy `index.html` (REMOVED)** — The root `index.html` was the HTML entry point for the flat prototype. Deleted in commit `9724cfb`. See [where-is-my-model.md](./where-is-my-model.md) for context.
+```
+Host runs: docker compose up
+         │
+         ├── mongo starts → healthcheck polls every 10s until ping succeeds
+         │
+         └── backend starts once mongo is healthy → loads .env.development → connects to mongodb://mongo:27017/where-is-my-model
+             │
+             └── frontend starts once backend is up → Vite dev server on :3000 with API proxy pointing to http://backend:8080
+```
 
-### Where are the external integrations?
-- **[backend](./backend.md)** implements a full Express + MongoDB API server (Mongoose ODM, CORS middleware, dotenv). The server is operational with `server.js` as entry point, environment configuration in `.env.development`, Mongoose models in `models/`, and REST routes in `routes/`. Health endpoint available at `/api/health`. Seed the database via `seed.js`.
-- **[docker](./docker.md)** — Docker Compose orchestration for the full stack (frontend, backend, mongo) with health checks, named volumes, and dependency-ordered startup.
-- **[frontend](./frontend.md)** — Vite dev server with `/api` proxy to the backend. Production build served by nginx with security headers, gzip compression, and reverse proxy for `/api`.
-- Google Fonts (JetBrains Mono + Spectral) loaded via `fonts.googleapis.com` with preconnect optimization for faster font delivery.
+### Named volumes
+
+| Volume | Mount path | Purpose |
+|--------|-----------|---------|
+| `mongo-data` | `/data/db` (inside mongo container) | Persistent MongoDB data across container restarts and recompositions |
+
+---
+
+### `.gitignore`
+
+Repository-level version-control exclusion list. Prevents sensitive environment files, generated build artifacts, dependency directories, and agent tooling configuration from being tracked by Git.
+
+### Excluded paths
+
+| Pattern | Rationale |
+|---------|-----------|
+| `.agents/` | Local AI agent tooling configuration — contains skills and agent definitions that should not be versioned |
+| `.env` | Environment variables / secrets that must remain local to each deployment |
+| `dist/` | Vite production build output (regenerated on every `npm run build`) |
+| `node_modules/` | Node.js dependencies (installed fresh via `npm install`; not portable across platforms) |
+| `skills-lock.json` | Auto-generated lockfile for agent skill versions — tracked per-environment, not in source control |
+
+---
+
+### `skills-lock.json`
+
+Lockfile that records which external agent skills are installed in this project and their content hashes. Used by the agent framework to determine whether a skill needs re-downloading or updating. Not version-controlled (see `.gitignore`).
+
+### Installed skills
+
+| Skill name | Source repository | Hash |
+|------------|------------------|------|
+| `frontend-design` | `anthropics/skills` (GitHub) | `063a0e…42bd2ffbca67` |
+| `vercel-react-best-practices` | `vercel-labs/agent-skills` (GitHub) | `ca7b0c…2506212` |
+
+---
+
+## Project architecture — the big picture
+
+### Technology stack summary
+
+| Layer | Technology | Role |
+|-------|-----------|------|
+| **Frontend framework** | React 18 (functional components + Hooks) | User interface for server dashboard and GPU calculator |
+| **Build tool** | Vite 5+ (ESM, HMR) | Fast dev server, production bundler |
+| **Styling** | Tailwind CSS | Utility-first classes applied directly in JSX templates |
+| **Backend framework** | Express 4.x | RESTful HTTP API, routing, middleware pipelines |
+| **ODM** | Mongoose 8.x | Schema definitions, validation MongoDB queries |
+| **Database** | MongoDB 7 | Persistent document storage for PC inventory and nested services |
+| **Container orchestration** | Docker Compose v3.9 | Three-service stack on a bridge network |
+
+### Full client–server data flow
+
+```
+Browser (port 3000)
+    │
+    ▼
+┌─────────────────────────────────────────────┐
+│  frontend/ (Vite dev server, React SPA)     │
+│                                             │
+│  main.jsx → App.jsx                         │
+│       │                                     │
+│       ├── Header.jsx  (page tabs, nav)      │
+│       │                                     │
+│       ├── PCGrid.jsx → PCCard.jsx           │
+│       │         → ServiceRow / GPUBar        │
+│       │         ← data from usePcs() hook    │
+│       │                                     │
+│       ├── Modals (Add/Edit/Delete)          │
+│       │     ← controlled by modalState router│
+│       │     ← call mutation hooks            │
+│       │                                     │
+│       └── GPUCalculatorPage.jsx             │
+│             ← uses calculatorEngine utils    │
+│                                             │
+│  services/apiClient.js                      │
+│       → fetch() → Vite proxy (/api/*)        │
+│                                             │
+└──────────────┬──────────────────────────────┘
+               │  /api/pcs, /api/pcs/:id/services
+               ▼
+┌─────────────────────────────────────────────┐
+│  backend/ (Express on port 8080)            │
+│                                             │
+│  server.js                                  │
+│       ├── CORS middleware (CLIENT_URL list) │
+│       ├── express.json() body parser        │
+│       ├── Route registration:               │
+│       │     /api/pcs/:pcId/services FIRST    │
+│       │     /api/pcs SECOND                  │
+│       └── Global error handler              │
+│                                             │
+│  middleware/validation.js                   │
+│       ├── validatePcBody                    │
+│       ├── validateServiceBody               │
+│       └── validateServiceUpdate             │
+│                                             │
+│  models/PC.js                               │
+│       → Mongoose schema with embedded        │
+│         servicios subdocuments, per-GPU      │
+│         virtual fields, VRAM-cap validators  │
+│                                             │
+│  routes/ (Express Routers)                  │
+│       → MongoDB CRUD via PC model            │
+│                                             │
+└──────────────┬──────────────────────────────┘
+               │  Mongoose connection string:
+               │  mongodb://mongo:27017/where-is-my-model
+               ▼
+┌─────────────────────────────────────────────┐
+│  mongo/ (MongoDB 7 on internal port 27017)   │
+│                                             │
+│  Collection: "pcs"                          │
+│       ├── nombre        (string, server     │
+│       │                 label)               │
+│       ├── ip            (IPv4 address)      │
+│       ├── gpus          [{ name, vram }]    │
+│       └── servicios     [{ nombre, puerto,  │
+│                           gpu, assignedGpu}] │
+│                                             │
+│  Volume: mongo-data:/data/db (persistent)   │
+└─────────────────────────────────────────────┘
+```
+
+### How the pieces fit together
+
+1. **Infrastructure layer** — Docker Compose starts MongoDB first with a health check. Once it pings clean, the backend container launches and connects via `mongodb://mongo:27017/where-is-my-model`. Finally, the frontend Vite dev server starts, configured to proxy all `/api/*` requests to `http://backend:8080`.
+
+2. **Data persistence** — Every PC (compute server) is a single MongoDB document in the `pcs` collection. Services running on that server are embedded subdocuments within the parent PC record. No separate services collection exists. The Mongoose `PC` model defines per-GPU VRAM capacity validators that fire both at the schema level and during `.save()`.
+
+3. **API contract** — The backend exposes two REST resources: `POST/GET/PUT/DELETE /api/pcs` for server management, and nested `POST/GET/PUT/DELETE /api/pcs/:pcId/services` for service lifecycle. All responses use a standard envelope (`{ data?, error?, success }`). Validation middleware intercepts request bodies before they reach route handlers, collecting all field errors into a single aggregated response.
+
+4. **Frontend orchestration** — The React SPA's `App.jsx` is the sole orchestrator: it owns all data-fetching hooks and mutation hooks, manages a modal-state router object to decide which dialog renders, and switches between dashboard and calculator views via a single `currentPage` state variable. Modals receive mutable callbacks; on success they trigger `refetch` through each hook's `onSuccess` callback, keeping the UI in sync with server state without manual refresh logic.
+
+5. **GPU calculator** — Independent of the CRUD flow, the calculator page (`GPUCalculatorPage.jsx`) imports the same utility functions from `utils/` that power dashboard visuals (`gpuHelpers.js` for colour coding/clamping, `calculatorEngine.js` for VRAM estimation across seven attention architectures). This ensures the numbers shown in the calculator match the visualisation on the dashboard.
+
+6. **Data seeding and testing** — `seed.js` in the backend reads a flat `data.json` from the repository root, transforms it into Mongoose-compatible documents, and populates the `pcs` collection. Two integration tests (`test-gpu-cap.js` and `target: test-gpu-cap.sh`) exercise the VRAM capacity enforcement end-to-end with auto-cleanup.
+
+---
+
+## Entry points for development
+
+| What to run | Command | Effect |
+|-------------|---------|--------|
+| Start the whole stack | `docker compose up` | Launches mongo → backend → frontend in sequence; frontend reachable at `http://localhost:3000`, API at `http://localhost:9003` |
+| Seed the database | `docker compose exec backend node seed.js` | Reads `data.json` and populates MongoDB via the PC model |
+| Run integration tests (Node) | `node backend/test-gpu-cap.js http://localhost:9003/api` | Exercises VRAM-cap enforcement, auto-cleans test data |
+| Run integration tests (Shell) | `./backend/test-gpu-cap.sh http://localhost:9003/api` | Same coverage as the Node variant, uses `curl` + `jq` |
+| Build for production | In frontend container: `npm run build` → `dist/` | Vite bundles a static SPA ready to serve behind any HTTP server |
+
+---
+
+## Quick reference — who does what?
+
+| Concern | Where to look |
+|---------|--------------|
+| REST API routes, middleware, models | `backend/` (see [Backend.md](./backend/Backend.md)) |
+| React components, hooks, API client | `frontend/src/` (see [Src.md](./frontend/src/Src.md)) |
+| Startup ordering, networking, volumes | `docker-compose.yml` (above) |
+| VRAM calculator algorithm details | `frontend/src/utils/calculatorEngine.js` (documented in [Src.md](./frontend/src/Src.md) under `utils/`) |
+| Per-GPU capacity enforcement chain | Spans `backend/middleware/`, `backend/models/`, and `backend/routes/` (all documented in [Backend.md](./backend/Backend.md)) |
