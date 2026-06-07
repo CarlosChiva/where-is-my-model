@@ -2,7 +2,7 @@ import PCCard from './PCCard';
 
 function PCGrid({ pcs, loading, onEditPc, onAddService, onDeletePc, onEditService, onDeleteService }) {
   return (
-    <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+    <section className="mt-8 md:mt-10 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
       {loading && (
         <div className="col-span-full flex items-center justify-center py-24">
           <span className="text-lg text-text-secondary animate-pulse">

@@ -7,7 +7,7 @@ function Header({ pcs, currentPage = 'dashboard', onPageChange }) {
 
   const tabs = [
     { id: 'dashboard', label: 'Dashboard' },
-    { id: 'calculator', label: 'Calculadora GPU' },
+    { id: 'calculator', label: 'Model Calculator' },
   ];
 
   return (

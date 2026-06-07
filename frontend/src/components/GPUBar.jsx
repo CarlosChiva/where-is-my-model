@@ -13,7 +13,7 @@ export default function GPUBar({ gpuGb, vramGb }) {
         aria-valuemin="0"
         aria-valuemax="100"
         className={`absolute inset-y-0 left-0 h-full ${colorClass} animate-gpu-fill${isWarning ? ' animate-gpu-warning' : ''}`}
-        style={{ '--gpu-target-width': `${percent}%` }}
+        style={{ '--gpu-target-width': `${percent}%`, width: '0%' }}
       />
     </div>
   )

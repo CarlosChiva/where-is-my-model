@@ -1,7 +1,7 @@
 # `components`
 
 > Path: `frontend/src/components/`
-> Last updated: 2026-06-04
+> Last updated: 2026-06-07
 > Type: Composite folder
 
 React UI components for the GPU Infrastructure Dashboard. Contains six presentational components (Header, GPUBar, GPUDetails, ServiceRow, PCCard, PCGrid) that follow a strict unidirectional data-flow pattern: they receive data and callbacks as props, perform no data fetching, and delegate all mutations back to the root `App.jsx`. Includes a `Modals/` subfolder with five modal-dialog components for data-entry, editing, and deletion confirmations.
@@ -21,7 +21,7 @@ React UI components for the GPU Infrastructure Dashboard. Contains six presentat
 
 ## 📄 `Header.jsx`
 
-Presentational header component with tab-based page navigation. Renders the application title, live server/service summary statistics, a horizontal tab switcher (Dashboard / Calculadora GPU), and two action buttons ("Add PC" and "Export JSON") that appear only on the Dashboard page. Layout adapts responsively: stacked column on mobile, inline row on desktop (`md:` breakpoint).
+Presentational header component with tab-based page navigation. Renders the application title, live server/service summary statistics, and a horizontal tab switcher (Dashboard / Model Calculator). Minimal layout: centered column with no action buttons or export functionality — those responsibilities have been delegated to parent-level components.
 
 ### Imports and dependencies
 
@@ -33,49 +33,31 @@ This component has no imports; it uses only native browser APIs internally.
 
 ### Functions
 
-#### `Header({ pcs, onAddPc, onSave, currentPage, onPageChange }) → JSX.Element` _(default export)_
+#### `Header({ pcs, currentPage, onPageChange }) → JSX.Element` _(default export)_
 
-Renders the application header with title, summary stats, tab navigation, and conditional action buttons.
+Renders the application header with title, summary stats, and tab navigation.
 
-- **`pcs: Array<PC>`** — Full array of server objects; used to compute `serverCount` (array length) and `serviceCount` (sum of all `pc.servicios.length`), and as the payload for JSON export.
-- **`onAddPc: () => void`** — Callback fired when "Add PC" button is clicked.
-- **`onSave: () => void`** — Callback fired after JSON export completes (backward compatibility).
-- **`currentPage: string`** _(default: `'dashboard'`)_ — Active page identifier. Accepted values: `'dashboard'` or `'calculator'`. Determines which tab is visually highlighted and whether action buttons are rendered.
+- **`pcs: Array<PC>`** — Full array of server objects; used to compute `serverCount` (array length) and `serviceCount` (sum of all `pc.servicios.length`).
+- **`currentPage: string`** _(default: `'dashboard'`)_ — Active page identifier. Accepted values: `'dashboard'` or `'calculator'`. Determines which tab is visually highlighted.
 - **`onPageChange: (pageId: string) => void`** _(optional)_ — Callback invoked when the user clicks a tab. Receives the `id` of the selected tab (`'dashboard'` or `'calculator'`). Guard-checked (`onPageChange && onPageChange(tab.id)`) so it is safe to omit.
 
-**Tab configuration (T08)**:
+**Tab configuration**:
 
 A local constant array defines the two navigation tabs:
 ```js
 const tabs = [
   { id: 'dashboard', label: 'Dashboard' },
-  { id: 'calculator', label: 'Calculadora GPU' },
+  { id: 'calculator', label: 'Model Calculator' },
 ];
 ```
 Each tab is rendered via `.map()` producing a `<button>` with `role="tab"` and `aria-selected` bound to the active state. Active tab uses accent-filled styling (`bg-accent text-bg-primary`); inactive tabs use input-bg styling with hover highlight (`bg-bg-input text-text-secondary hover:text-text-primary`). The nav container has `aria-label="Page navigation"`.
 
-**Layout changes (T08)**:
-
-- Header root `<header>` changed from `items-center` to `items-start` for proper mobile stacking when the tab row is present.
-- Left-zone `<div>` uses `w-full md:w-auto` — full-width on mobile (title stacks above stats and tabs), auto-width on desktop (all elements flow in a single row).
-- Action buttons ("Add PC", "Export JSON") are wrapped in a conditional render: `{currentPage === 'dashboard' && (...)}`. They appear only when the Dashboard tab is active, hiding them on the Calculadora GPU page.
-
-**Internal methods:**
-
-- **`handleExport() → void`**
-  Serializes the `pcs` array to a formatted JSON string, wraps it in a `Blob` with MIME type `application/json`, creates an object URL, generates a timestamped filename (`gpu-infra-{ISO-timestamp}.json`), programmatically triggers the browser download via a temporary anchor element, then cleans up the DOM and revokes the object URL. After export, invokes `onSave()` if it is a function.
-  - Serialization: `JSON.stringify(pcs, null, 2)`
-  - Blob: `new Blob([json], { type: 'application/json' })`
-  - URL: `URL.createObjectURL(blob)`
-  - Filename: `gpu-infra-{timestamp}.json` where timestamp is ISO 8601 with `:` and `.` replaced by `-`
-  - Cleanup: removes anchor from DOM, calls `URL.revokeObjectURL(url)`
+**Layout**: Header root `<header>` uses centered flex column (`flex flex-col items-center gap-4`). Inner content is a centered column (`flex flex-col gap-2 text-center items-center`) containing the title, live summary stats, and tab navigation. No conditional rendering — no action buttons are rendered by this component.
 
 ### Accessibility features
 
 - `aria-live="polite"` on summary span for screen reader announcements.
-- Both SVG icons (plus, download) have `aria-hidden="true"`.
-- All buttons use `type="button"`.
-- Tab `<nav>` has `aria-label="Page navigation"`. Each tab button has `role="tab"` with `aria-selected` dynamically bound to the active page. Focus ring uses `focus:ring-[0_0_0_2px] focus:ring-accent-dim`.
+- Tab `<nav>` has `aria-label="Page navigation"`. Each tab button has `role="tab"` with `aria-selected` dynamically bound to the active page. All buttons use `type="button"`. Focus ring uses `focus:ring-[0_0_0_2px] focus:ring-accent-dim`.
 
 ---
 
@@ -102,6 +84,8 @@ Renders an animated horizontal progress bar showing GPU VRAM utilization percent
 - `percent`: `(gpuGb / vramGb) * 100`, clamped to [0, 100] via `clamp()` utility; defaults to 0 if `vramGb === 0`.
 - `colorClass`: from `getGpuColorClass(percent)` — green ≤35, yellow 36–70, red >70.
 - `isWarning`: `percent > 80` — triggers pulsing warning glow animation.
+
+**Animated fill mechanism:** The inner `<div>` uses a CSS custom property (`--gpu-target-width: ${percent}%`) together with an explicit inline style `width: '0%'`. The `'0%'` value prevents React from collapsing the bar to zero width during re-renders (when component state triggers a full re-render rather than an incremental update). The CSS transition on the element gradually animates `width` from its CSS-initial `0%` to the target defined by `--gpu-target-width`, producing a smooth fill effect. Without the explicit `width: '0%'`, React could re-apply the previously computed inline width and skip the animation or cause a visual flicker.
 
 **Accessibility:** Uses `role="progressbar"` with `aria-valuenow`, `aria-valuemin="0"`, `aria-valuemax="100"`.
 
@@ -236,6 +220,8 @@ Root container for PC cards. Renders a responsive CSS Grid (1 col mobile, 2 col 
 2. `!loading && pcs.length === 0` → "No servers configured yet" with guidance text.
 3. `!loading && pcs.length > 0` → maps `pcs[]` to `<PCCard>` instances, keyed by `pc._id`.
 
+**Spacing (T29):** The root `<section>` carries `mt-8 md:mt-10` — 32px top margin on mobile, 40px on desktop (`md:` breakpoint). This creates visual breathing room between the Header's tab/action-row and the PC card grid on the Dashboard page.
+
 **Accessibility:** Uses `<section>` for semantic grouping.
 
 ---
@@ -268,3 +254,17 @@ Root container for PC cards. Renders a responsive CSS Grid (1 col mobile, 2 col 
 - **Updated** `Header.jsx`: added two new props — `currentPage` (string: `'dashboard' | 'calculator'`, default `'dashboard'`) and `onPageChange` (optional callback, guard-checked). These drive a `<nav>` tab switcher with two tabs: "Dashboard" and "Calculadora GPU". Tabs use WAI-ARIA tab pattern (`role="tab"`, dynamic `aria-selected`).
 - **Updated** `Header.jsx`: layout changed from centered flex to start-aligned. Left zone now stacks vertically on mobile (`flex-col w-full`) and flows inline on desktop (`md:flex-row` on parent, `md:w-auto` on left zone). Tab `<nav>` sits between summary stats and action buttons.
 - **Updated** `Header.jsx`: "Add PC" and "Export JSON" buttons are conditionally rendered inside `{currentPage === 'dashboard' && (...)}` block. They remain untouched when Dashboard is active; they disappear entirely on the calculator page, removing redundant UI from a screen where those actions have no meaning.
+
+### GPUBar — Fixed bar width collapse on React re-renders
+- **Updated** `GPUBar.jsx`: added explicit inline style `width: '0%'` to the inner `<div>` (the animated progress fill element). The bar already uses CSS custom property `--gpu-target-width` for the target width value together with a CSS transition. However, during full React re-renders (e.g., when parent state changes and triggers complete subtree reconciliation), React can skip applying the CSS transition if the inline `width` style is absent — causing the bar to snap to its final width instantly or collapse to 0px before animating. The explicit `width: '0%'` ensures a reliable initial value so the CSS `transition` property always animates from zero to `--gpu-target-width`.
+- **Why this matters:** This fix eliminates visual flicker/glitch on dashboard update cycles when hook data refetches cause the entire PCGrid tree to re-render. The animation is now deterministic across all React rendering paths (incremental updates and full re-renders alike).
+
+### T29 — PCGrid top-margin spacing between Header and card grid
+- **Updated** `PCGrid.jsx`: the root `<section>` element now carries `mt-8 md:mt-10` Tailwind classes — 32px (`2rem`) top margin on mobile, 40px (`2.5rem`) on desktop (`md:` breakpoint and above).
+- **Purpose:** Creates visual breathing room between the Header's tab switcher / action-button row and the PC card grid on the Dashboard page. Without this spacing, the navigation controls visually run into the first row of cards.
+- **No behavioral changes:** All props, state logic, callback passthroughs, conditional rendering states (loading / empty / populated), and accessibility attributes remain unchanged. This is a purely cosmetic addition to the Tailwind class list on line 5 (`<section className="mt-8 md:mt-10 grid ...">`).
+
+### Tab label rename — "Calculadora GPU" → "Model Calculator"
+- **Updated** `Header.jsx`: the second tab label changed from `'Calculadora GPU'` to `'Model Calculator'`. The internal `id` remains `'calculator'`, so all routing logic, `currentPage` comparisons (`currentPage === 'calculator'`), and parent component state handling are unaffected.
+- **Removed** props `onAddPc` and `onSave`, the "Add PC" button, the "Export JSON" button, and the `handleExport()` internal method from `Header.jsx`. These responsibilities have been delegated to parent-level components (likely `App.jsx`). The component is now purely navigational: title + live stats + tab switcher.
+- **Reverted** layout back to a centered column (`items-center` on root `<header>`, `text-center items-center` on inner container). The previous T08 asymmetric left-zone / desktop-inline layout has been removed.
