@@ -178,9 +178,6 @@ React functional component that serves as the application shell. Manages data fl
 - **`handlePageChange(page: string) → void`**
   Switches the active page and atomically resets any open modal to prevent lingering dialogs.
 
-- **`handleSave() → void`**
-  No-op handler passed to `<Header>` as the export callback (Header handles JSON serialization internally).
-
 **Derived values:**
 
 - **`deleteMessage: string`** — Dynamically constructs a confirmation message based on `modalState.payload.actionType`: specific server name for PC deletion, generic message for service deletion. Falls back to empty string if no payload.
@@ -189,23 +186,23 @@ React functional component that serves as the application shell. Manages data fl
 
 ```
 <div className="min-h-screen ...">
-  <Header              currentPage /> onPageChange /> pcs /> onAddPc /> onSave />
+  <Header              currentPage /> onPageChange /> pcs /> onAddPc />
   
   {currentPage === 'dashboard' ? (
     <>
       <PCGrid   pcs /> loading /> onEditPc /> onAddService /> onDeletePc />
                    onEditService /> onDeleteService />
-      
-      {/* Modal routing — one of five modals conditionally rendered */}
-      {modalState.type === 'addPc'        && <AddPcModal .../>}
-      {modalState.type === 'editPc'       && <EditPcModal .../>}
-      {modalState.type === 'addService'   && <AddServiceModal .../>}
-      {modalState.type === 'editService'  && <EditServiceModal .../>}
-      {modalState.type === 'deleteConfirm' && <DeleteConfirmModal .../>}
-    </>
-  ) : (
-    <GPUCalculatorPage />
-  )}
+       
+       {/* Modal routing — one of five modals conditionally rendered */}
+       {modalState.type === 'addPc'        && <AddPcModal .../>}
+       {modalState.type === 'editPc'       && <EditPcModal .../>}
+       {modalState.type === 'addService'   && <AddServiceModal .../>}
+       {modalState.type === 'editService'  && <EditServiceModal .../>}
+       {modalState.type === 'deleteConfirm' && <DeleteConfirmModal .../>}
+     </>
+   ) : (
+     <GPUCalculatorPage />
+   )}
 </div>
 ```
 
@@ -222,6 +219,14 @@ Global CSS entry point for Tailwind CSS. Imports the three standard Tailwind dir
 | `@tailwind base` | Resets browser defaults, sets base typography and colours. |
 | `@tailwind components` | Provides pre-styled component classes (e.g., buttons, forms if configured). |
 | `@tailwind utilities` | Enables all utility-first classes used throughout the JSX (`bg-*`, `text-*`, `p-*`, `grid-*`, etc.). |
+
+---
+
+## 🔄 Changes in this update
+
+### Removal of `handleSave` no-op and corresponding `onSave` prop on `<Header>`
+- **Removed** the no-op function `const handleSave = () => {}` from `App.jsx`. This callback had previously been passed as `onSave={handleSave}` to the `<Header>` component. The Header's `handleExport()` method independently performs JSON serialization and download; this orphaned parent-level callback served no purpose.
+- **Removed** the `onSave` prop from the `<Header>` JSX rendering in `App.jsx`. The `<Header>` now receives four props: `currentPage`, `onPageChange`, `pcs`, and `onAddPc`.
 
 ---
 

@@ -13,7 +13,7 @@ function PCGrid({ pcs, loading, onEditPc, onAddService, onDeletePc, onEditServic
       {!loading && pcs.length === 0 && (
         <div className="col-span-full text-center py-12 text-text-secondary">
           <p className="text-lg">No servers configured yet.</p>
-          <p className="text-sm mt-2 text-text-muted">Click "Add PC" to get started.</p>
+          <p className="text-sm mt-2 text-text-muted">Use the + button to add your first server.</p>
         </div>
       )}
       {!loading && pcs.length > 0 && (

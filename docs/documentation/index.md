@@ -13,7 +13,7 @@
 | Folder | Documentation | Description |
 |--------|--------------|-------------|
 | `backend/` | [see docs](./backend/Backend.md) | Express + Mongoose REST API with per-GPU VRAM capacity enforcement, multi-GPU schema support, request-body validation middleware, and integration tests. |
-| `frontend/src/` | [see docs](./frontend/src/Src.md) | React + Vite single-page application with Tailwind CSS, custom hooks for all CRUD mutations, modal orchestrator, GPU calculator engine, and shared colour-coding utilities. |
+| `frontend/` | [see docs](./frontend.md) | React 19 + Vite 8 SPA project root: Tailwind theme configuration, PostCSS/ESLint pipeline config, package manifest, three-stage Dockerfile, nginx production server config, SPA entry HTML, and environment files. |
 
 ---
 

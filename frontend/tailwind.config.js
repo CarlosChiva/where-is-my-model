@@ -41,6 +41,7 @@ export default {
         'card-hover': '0 6px 24px rgba(0,212,170,0.1), 0 2px 8px rgba(0,0,0,0.3)',
         'btn-primary': '0 1px 4px rgba(0,212,170,0.25)',
         'btn-danger': '0 1px 4px rgba(255,107,107,0.25)',
+        fab:          '0 4px 20px rgba(0,212,170,0.3), 0 6px 8px rgba(0,0,0,0.35)',
       },
       animation: {
         'card-enter':    'cardSlideInUp 0.4s ease-out both',

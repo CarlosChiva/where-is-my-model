@@ -52,12 +52,18 @@ Root React component of the GPU Infrastructure Dashboard. Orchestrates the full 
 | Hook | Variable | Initial value | Role |
 |------|----------|---------------|------|
 | `useState` | `modalState` | `{ type: null, payload: null }` | Modal router — `type` determines which modal renders, `payload` carries data forwarded to it. |
-| `useState` | `currentPage` | `'dashboard'` | Page router — switches between `'dashboard'` (default) and `'calculator'` views. |
+| `useState` | `currentPage` | `'dashboard'` | Page router — switches between `'dashboard'` (default) and `'calculator'` views. Changing pages also closes any open modal via `handlePageChange`. |
 
 ### Callback handlers
 
 - **`closeModal() → void`**
   Resets `modalState` to `{ type: null, payload: null }`, closing any open modal.
+
+- **`handlePageChange(page: string) → void`**
+  Switches the active page (between `'dashboard'` and `'calculator'`) and closes any open modal. Modals are scoped to the dashboard; navigating away from it dismisses them automatically.
+
+- **`deleteMessage` (derived)**
+  Builds a confirmation message from `modalState.payload`. If `actionType === 'pc'`, includes the server name (`nombre`). Otherwise, uses a generic service-deletion message. Evaluated as an inline ternary during render.
 
 - **`handleAddPc(pcData: Object) → Promise<void>`**
   Persists a new GPU server via `createPcHook.mutate(pcData)`. On success (no error in result), closes the modal. The `refetch` callback fires automatically.

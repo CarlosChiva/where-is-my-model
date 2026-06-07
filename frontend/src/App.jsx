@@ -154,9 +154,6 @@ export default function App() {
     setModalState({ type: null, payload: null });
   };
 
-  /* No-op onSave passed to Header — the component handles export internally. */
-  const handleSave = () => {};
-
   /* ── Render ─────────────────────────────────────────────────── */
   return (
     <div className="min-h-screen bg-bg-primary text-text-primary font-sans p-4 md:p-8">
@@ -165,8 +162,6 @@ export default function App() {
         currentPage={currentPage}
         onPageChange={handlePageChange}
         pcs={pcs}
-        onAddPc={() => setModalState({ type: 'addPc', payload: null })}
-        onSave={handleSave}
       />
 
       {/* Page router: dashboard (grid + modals) vs calculator */}
@@ -246,6 +241,32 @@ export default function App() {
         </>
       ) : (
         <GPUCalculatorPage />
+      )}
+
+      {/* Floating "Add PC" button — dashboard only */}
+      {currentPage === 'dashboard' && (
+        <button
+          type="button"
+          onClick={() => setModalState({ type: 'addPc', payload: null })}
+          aria-label="Add PC"
+          className="fixed bottom-6 right-6 z-40 w-12 h-12 md:w-14 md:h-14 rounded-full bg-accent text-bg-primary shadow-fab hover:bg-accent-hover active:scale-95 transition-all flex items-center justify-center focus:outline-none focus:ring-[0_0_0_3px] focus:ring-accent-dim"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+        </button>
       )}
     </div>
   );

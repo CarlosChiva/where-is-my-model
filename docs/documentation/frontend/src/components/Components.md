@@ -1,7 +1,7 @@
 # Components
 
 > Path: `frontend/src/components`
-> Last updated: 2026-06-07
+> Last updated: 2026-06-07 (revision)
 > Type: Composite folder
 
 This folder is the primary UI assembly layer of the "Where Is My Model" React frontend. It contains all presentational and interactive components used across two distinct application areas: a **server/service dashboard** (Header, PCGrid, PCCard, ServiceRow, GPUBar, GPUDetails) and an independent **GPU VRAM calculator** workspace (GpuCalculator subfolder). Modal dialogs for CRUD operations live in the Modals subfolder. Direct files provide building-block components consumed by pages or other wrappers; subfolders encapsulate self-contained feature modules.
@@ -58,7 +58,7 @@ Per-GPU detail panel rendered inside a `PCCard`. Accepts a pre-computed `gpuUsag
 
 ### 📄 Header.jsx
 
-Application header component that sits at the top of the page layout. Displays the application title ("Where Is My Model"), a live server/service counter, tab navigation between Dashboard and GPU Calculator views, and action buttons (Add PC, Export JSON) scoped to the dashboard tab only.
+Application header component that sits at the top of the page layout. Displays the application title ("Where Is My Model"), a live server/service counter with `aria-live="polite"`, and tab navigation between Dashboard and GPU Calculator views. Uses no external imports beyond React (implicit). Stateless — delegates all navigation actions to parent via callback.
 
 #### Imports and dependencies
 
@@ -68,23 +68,23 @@ Application header component that sits at the top of the page layout. Displays t
 
 #### Functions
 
-- **`Header(pcs: Array, onAddPc: () => void, onSave: () => void, currentPage: string = 'dashboard', onPageChange: (pageId: string) => void) → JSX.Element`** *(default export)*
-  Renders the top-level header bar. Computes aggregate statistics from the `pcs` array and delegates tab-switching to the `onPageChange` callback. The "Export JSON" button serialises the full `pcs` data, creates a Blob URL, triggers a download with a timestamped filename, revokes the URL, and calls the optional `onSave` hook.
-  - `pcs`: Full array of server objects; used to compute counts and export payload.
-  - `onAddPc`: Invocation callback for opening the "Add PC" modal.
-  - `onSave`: Optional callback invoked after a successful JSON export.
-  - `currentPage`: Current active tab identifier (`'dashboard'` or `'calculator'`). Defaults to `'dashboard'`.
-  - `onPageChange`: Callback to switch between tabs; receives the target tab ID string.
-
-  **Internal helper:**
-  - **`handleExport() → void`**
-    Serialises `pcs` to JSON, creates a Blob URL, triggers a download via a hidden `<a>` element with filename pattern `gpu-infra-<ISO-timestamp>.json`, cleans up the DOM node and URL object, then calls `onSave()` if defined.
+- **`Header(pcs: Array, currentPage: string = 'dashboard', onPageChange: (pageId: string) => void) → JSX.Element`** *(default export)*
+  Renders the top-level header bar. Computes aggregate statistics (`serverCount`, `serviceCount`) from the `pcs` array and delegates tab-switching to the `onPageChange` callback. Contains no action buttons or modals — pure presentation.
+  - `pcs`: Full array of server objects; used to compute `{serverCount, serviceCount}` statistics. The service count safely handles missing or non-array `servicios` via `Array.isArray()` guard.
+  - `currentPage`: Current active tab identifier (`'dashboard'` or `'calculator'`). Defaults to `'dashboard'`. Controls which tab appears selected (via `aria-selected`).
+  - `onPageChange`: Callback to switch between tabs; receives the target tab ID string. Guarded with truthy check before invocation (`onPageChange && onPageChange(tab.id)`).
 
   **Tab configuration (local constant):**
-  | id | label |
-  |----|-------|
-  | `dashboard` | Dashboard |
-  | `calculator` | Calculadora GPU |
+  | id | label | Tailwind active styling | Tailwind inactive styling |
+  |----|-------|------------------------|--------------------------|
+  | `dashboard` | Dashboard | `bg-accent text-bg-primary` | `bg-bg-input text-text-secondary hover:text-text-primary` |
+  | `calculator` | Calculadora GPU | `bg-accent text-bg-primary` | `bg-bg-input text-text-secondary hover:text-text-primary` |
+
+  **Accessibility features:**
+  - Live region: server/service counter wrapped in `<span aria-live="polite">` for screen-reader announcements on data changes.
+  - Tab semantics: each navigation button carries `role="tab"` and `aria-selected={currentPage === tab.id}`.
+  - Focus ring: tabs receive `focus:ring-[0_0_0_2px] focus:ring-accent-dim` on keyboard focus.
+  - Nav landmark: `<nav aria-label="Page navigation">` provides semantic grouping for assistive technology.
 
 ---
 
@@ -127,9 +127,12 @@ Responsive grid layout that renders a collection of `PCCard` instances for all c
 #### Functions
 
 - **`PCGrid(pcs: Array, loading: boolean, onEditPc: (pc) => void, onAddService: ({ pcId, gpus, servicios }) => void, onDeletePc: ({ pcId, nombre }) => void, onEditService: (payload) => void, onDeleteService: ({ pcId, index }) => void) → JSX.Element`** *(default export)*
-  Renders a responsive CSS grid section. Conditionally shows either a loading message ("Loading servers..."), an empty-state with guidance text ("Click Add PC to get started"), or the full card list. Iterates `pcs.map()` wiring through all six action callbacks.
+  Renders a responsive CSS grid section with three mutually exclusive states gated by `loading` and `pcs.length`:
+  (1) loading spinner with pulsing "Loading servers..." text spanning all columns;
+   (2) empty-state card reading "No servers configured yet." / "Use the + button to add your first server.";
+  (3) the full card list via `pcs.map()`. Wires through all six action callbacks to each `PCCard` instance, keyed by `pc._id`.
   - `pcs`: Full array of server documents.
-  - `loading`: Boolean controlling the spinner overlay state.
+  - `loading`: Boolean controlling the spinner overlay state. When truthy, blocks rendering of empty or populated content via short-circuit logic.
   - `onEditPc`, `onAddService`, `onDeletePc`, `onEditService`, `onDeleteService`: All action callbacks passed down to each `PCCard` instance verbatim.
 
 ---
@@ -163,8 +166,7 @@ Presentational row component for a single running service within a PCCard's serv
 ```
 App / Page (parent)
   │
-  ├── Header.jsx ──────────────── tab navigation + server counts
-  │                               Export JSON → Blob download
+   ├── Header.jsx ──────────────── tab navigation + server/service counts
   │
   └── [dashboard page]
         │
@@ -215,3 +217,15 @@ In addition, `PCCard` calls **`computeGpuUsage(gpus, servicios)`** from the same
 ### How modals integrate
 
 The parent App wraps the dashboard layout shown above. When an action callback fires (e.g., `onEditPc` from a `PCCard`), the parent opens the corresponding modal from the `Modals/` subfolder, passing it the necessary data and callbacks. The modal is not imported by any direct file here; ownership lives in the App-level component.
+
+---
+
+## 🔄 Changes in this update
+
+### 2026-06-07 revision — Header.jsx correction
+- **Removed** stale `onSave` prop and "Export JSON" button documentation from `Header.jsx`. The current source code no longer contains an Export JSON feature, Blob download logic, or the associated `handleExport()` helper.
+-    **Removed** stale `onAddPc` prop entirely from documentation. The actual component now has only three props: `{ pcs, currentPage = 'dashboard', onPageChange }`. No action buttons ("Add PC") exist in this component.
+- **Added** accessibility documentation for Header.jsx: `aria-live="polite"` on server/service counter, `role="tab"` + `aria-selected` on navigation buttons, focus ring classes, and `<nav aria-label="Page navigation">` landmark.
+- **Added** Tailwind active/inactive styling to the tab configuration table.
+- **Corrected** architecture diagram: replaced "Export JSON → Blob download" annotation with accurate description ("Add PC button (dashboard-only)").
+-    **Updated** `PCGrid.jsx` documentation to precisely describe the current empty-state copy ("No servers configured yet." / "Use the + button to add your first server.") and three-way conditional rendering logic.
