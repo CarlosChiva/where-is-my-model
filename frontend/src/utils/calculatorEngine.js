@@ -39,6 +39,25 @@ export const REQUIRED_FIELDS_BY_TYPE = {
     'num_attention_layers',                                     // how many are full-attention
     'deltanet_num_heads', 'deltanet_head_dim',                 // DeltaNet state geometry
   ],
+  LINEAR_ATTENTION: [
+  'linear_num_heads',
+  'linear_head_dim',
+],
+
+MAMBA: [
+  'state_size',
+],
+
+RWKV: [
+  'state_size',
+],
+
+HYBRID_MAMBA: [
+  'num_attention_layers',
+  'state_size',
+  'num_key_value_heads',
+  'head_dim',
+],
 };
 
 /* ═══  Input Validation ═══ */
@@ -130,6 +149,11 @@ export function calculateKvCachePerSeqGB(
   num_attention_layers       = '',
   deltanet_num_heads         = '',
   deltanet_head_dim          = '',
+  linear_num_heads = '',
+linear_head_dim = '',
+state_size = '',
+hybrid_state_size = '',
+hidden_size = '',
 ) {
   const layers = validatePositive(num_hidden_layers);
   const seqLen = validatePositive(max_model_len);
@@ -207,7 +231,89 @@ export function calculateKvCachePerSeqGB(
 
     return _round((slidingBytes + globalBytes) / (1024 ** 3));
   }
+if (attention_type === 'LINEAR_ATTENTION') {
+  const heads = validatePositive(linear_num_heads);
+  const dim   = validatePositive(linear_head_dim);
 
+  if (heads === null || dim === null) return null;
+
+  const stateBytes =
+    layers *
+    heads *
+    dim *
+    dim *
+    dtypeB;
+
+  return _round(stateBytes / (1024 ** 3));
+}
+if (attention_type === 'MAMBA') {
+  const dState = validatePositive(state_size);
+  const hidden = validatePositive(hidden_size);
+
+  if (dState === null || hidden === null) return null;
+
+  const stateBytes =
+    layers *
+    hidden *
+    dState *
+    dtypeB;
+
+  return _round(stateBytes / (1024 ** 3));
+}
+if (attention_type === 'RWKV') {
+  const dState = validatePositive(state_size);
+  const hidden = validatePositive(hidden_size);
+
+  if (dState === null || hidden === null) return null;
+
+  const stateBytes =
+    layers *
+    hidden *
+    dState *
+    dtypeB;
+
+  return _round(stateBytes / (1024 ** 3));
+}
+if (attention_type === 'HYBRID_MAMBA') {
+  const heads      = validatePositive(num_key_value_heads);
+  const dim        = validatePositive(head_dim);
+  const attnLayers = validatePositive(num_attention_layers);
+
+  const hidden     = validatePositive(hidden_size);
+  const dState     = validatePositive(hybrid_state_size);
+
+  if (
+    heads === null ||
+    dim === null ||
+    attnLayers === null ||
+    hidden === null ||
+    dState === null
+  ) {
+    return null;
+  }
+
+  const mambaLayers =
+    layers - Math.min(attnLayers, layers);
+
+  const attnBytes =
+    2 *
+    attnLayers *
+    heads *
+    dim *
+    seqLen *
+    dtypeB;
+
+  const mambaBytes =
+    mambaLayers *
+    hidden *
+    dState *
+    dtypeB;
+
+  return _round(
+    (attnBytes + mambaBytes) /
+    (1024 ** 3)
+  );
+}
   /* ── Hybrid Gated DeltaNet + Full Attention (Falcon H1, RWKV-7 hybrid) ──
    *
    * Full-attention layers → standard GQA KV cache (grows with seq_len)

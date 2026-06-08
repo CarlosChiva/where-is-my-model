@@ -10,7 +10,10 @@ export default function ModelFormSection({ values = {}, onChange }) {
   const isSWA_DUAL     = attentionType === 'SWA_DUAL';
   const isHybridDelta  = attentionType === 'HYBRID_DELTANET';
   const isClassic      = !isMLA && !isSWA && !isHybridDelta;
-
+const isLinearAttention = attentionType === 'LINEAR_ATTENTION';
+const isMamba           = attentionType === 'MAMBA';
+const isRWKV            = attentionType === 'RWKV';
+const isHybridMamba     = attentionType === 'HYBRID_MAMBA';
   const { missing } = validateRequiredFields(attentionType, values);
   const isMissing   = (id) => missing.includes(id);
 
@@ -24,6 +27,10 @@ export default function ModelFormSection({ values = {}, onChange }) {
     { value: 'SWA_GLOBAL',      label: 'SWA + Global misma geometría (Gemma 2, Phi-3…)' },
     { value: 'SWA_DUAL',        label: 'SWA + Global geometría dual (Gemma 4 12B / 31B…)' },
     { value: 'HYBRID_DELTANET', label: 'Hybrid DeltaNet + Attention (Falcon H1…)' },
+  { value: 'LINEAR_ATTENTION', label: 'Linear Attention (Kimi Linear, RetNet...)' },
+{ value: 'MAMBA',            label: 'Mamba State Space Model' },
+{ value: 'RWKV',             label: 'RWKV Recurrent Transformer' },
+{ value: 'HYBRID_MAMBA',     label: 'Hybrid Mamba + Attention (Jamba)' },
   ];
 
   const attentionHints = {
@@ -36,6 +43,10 @@ export default function ModelFormSection({ values = {}, onChange }) {
     SWA_GLOBAL:      'Capas SWA + capas globales con la misma geometría KV. (Gemma 2, Phi-3)',
     SWA_DUAL:        'Capas SWA y capas globales con head_dim y kv_heads distintos. (Gemma 4)',
     HYBRID_DELTANET: 'Capas DeltaNet (estado fijo recurrente) alternadas con capas de atención cuadrática. (Falcon H1)',
+    LINEAR_ATTENTION:'Estado recurrente fijo por capa. No genera KV cache proporcional al contexto.',
+    MAMBA:           'Modelo State Space. Mantiene estado fijo independiente del contexto.',
+    RWKV:            'Arquitectura recurrente. El estado no crece con seq_len.',
+    HYBRID_MAMBA:    'Capas de atención mezcladas con capas Mamba (Jamba).',
   };
 
   const inputCls =
@@ -249,6 +260,43 @@ export default function ModelFormSection({ values = {}, onChange }) {
         placeholder: '256',
         step: '1',
       })}
+      {isLinearAttention && renderInput({
+        id: 'linear_num_heads',
+        label: 'Linear Attention Heads',
+        hint: 'Número de cabezas recurrentes',
+        placeholder: '16',
+        step: '1',
+      })}
+
+      {isLinearAttention && renderInput({
+        id: 'linear_head_dim',
+        label: 'Linear Head Dim',
+        hint: 'Dimensión por cabeza',
+        placeholder: '256',
+        step: '1',
+      })}
+      {(isMamba || isRWKV) && renderInput({
+  id: 'state_size',
+  label: 'State Size',
+  hint: 'd_state del modelo',
+  placeholder: '64',
+  step: '1',
+})}
+{isHybridMamba && renderInput({
+  id: 'num_attention_layers',
+  label: 'Num Attention Layers',
+  hint: 'Capas que usan atención tradicional',
+  placeholder: '16',
+  step: '1',
+})}
+
+{isHybridMamba && renderInput({
+  id: 'hybrid_state_size',
+  label: 'Mamba State Size',
+  hint: 'd_state de las capas Mamba',
+  placeholder: '64',
+  step: '1',
+})}
 
       {/* ── Always visible ── */}
       {renderInput({
