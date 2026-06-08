@@ -262,8 +262,8 @@ export default function ModelFormSection({ values = {}, onChange }) {
       {renderInput({
         id: 'num_parameters',
         label: 'Num Parameters',
-        hint: 'Parámetros totales (e.g. 7000000000 para un modelo 7B)',
-        placeholder: '7000000000',
+        hint: 'Parámetros totales (e.g. 7 para un modelo 7B)',
+        placeholder: '7',
         step: '1',
       })}
     </section>
