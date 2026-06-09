@@ -1,7 +1,7 @@
 # `utils`
 
 > Path: `frontend/src/utils/`
-> Last updated: 2026-06-08
+> Last updated: 2026-06-09
 > Type: Composite folder
 
 General-purpose utility module for the GPU Infrastructure Dashboard frontend. Contains a calculation engine for estimating VRAM requirements when loading LLM models onto GPUs (now orchestrated via a Strategy pattern across 13 attention architectures), shared validation/rounding helpers extracted into their own module to eliminate circular dependencies, GPU visualization colour mapping and per-GPU usage computation, and client-side form validation for PC and Service entities.
@@ -230,5 +230,9 @@ None — entirely self-contained. No external or internal imports.
   - **`services`:** Optional. Existing services array on the target PC (excluding the entry under edit for capacity computation). Passed to `getRemainingVram`. For ADD: all current services. For EDIT: services minus the entry being edited.
   - **`gpus`:** Optional. The PC's `gpus[]` array (`[{ name, vram }]`). Used for bounds checking on `assignedGpu` and as input to `getRemainingVram`.
   - **Returns:** `{ valid: boolean, errors: { nombre?: string, puerto?: string, gpu?: string, assignedGpu?: string } }`. `valid` is `true` iff `errors` has zero keys.
+
+## 🔄 Changes in this update
+
+- **`calculatorEngine.js`** — In `REQUIRED_FIELDS_BY_TYPE['HYBRID_MAMBA']`, the field name `'state_size'` was renamed to `'hybrid_state_size'`. This aligns the required-fields validator with the existing parameter name used by `calculateKvCachePerSeqGB()`, ensuring consistency across the public API.
 
 ---

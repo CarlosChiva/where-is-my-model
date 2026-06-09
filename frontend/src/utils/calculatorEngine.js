@@ -60,7 +60,7 @@ RWKV: [
 
 HYBRID_MAMBA: [
   'num_attention_layers',
-  'state_size',
+  'hybrid_state_size',
   'num_key_value_heads',
   'head_dim',
 ],

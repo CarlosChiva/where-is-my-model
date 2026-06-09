@@ -151,7 +151,7 @@ const isHybridMamba     = attentionType === 'HYBRID_MAMBA';
       })}
 
       {/* ── Classic KV fields: MHA / GQA / MQA / SWA / SWA_GLOBAL / SWA_DUAL / HYBRID ── */}
-      {(isClassic || isSWA || isHybridDelta) && renderInput({
+      {(isClassic || isSWA || isHybridDelta || isHybridMamba) && renderInput({
         id: 'num_key_value_heads',
         label: isSWA_DUAL ? 'KV Heads (capas sliding)' : 'Num Key / Value Heads',
         hint: isSWA_DUAL
@@ -161,7 +161,7 @@ const isHybridMamba     = attentionType === 'HYBRID_MAMBA';
         step: '1',
       })}
 
-      {(isClassic || isSWA || isHybridDelta) && renderInput({
+      {(isClassic || isSWA || isHybridDelta || isHybridMamba) && renderInput({
         id: 'head_dim',
         label: isSWA_DUAL ? 'Head Dim (capas sliding)' : 'Head Dim',
         hint: isSWA_DUAL
