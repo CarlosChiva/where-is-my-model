@@ -180,6 +180,51 @@ Parses the integer index, validates bounds, then splices the service from the `s
 
 ---
 
+## 📄 `health.js`
+
+Express router dedicated to TCP-based service health checks against GPU compute servers. Default-exports an Express `Router` with two POST endpoints that leverage the `healthChecker.js` utility (in `backend/services/`) to probe the reachability of long-running network services hosted on each PC's configured IP address and ports. Uses double ObjectId protection: a preemptive `isValidObjectId()` check before database access, plus a Mongoose `CastError` fallback in the catch block — consistent with conventions established in `pcs.js`. Error responses follow the `{ success: false, message }` envelope pattern shared across all route modules.
+
+### Imports and dependencies
+
+| Module | Imported elements | Type |
+|--------|-------------------|------|
+| `express` | `express` (default) | External |
+| `mongoose` | `isValidObjectId` (named) | External |
+| `../models/PC.js` | `PC` (default) | Internal |
+| `../services/healthChecker.js` | `checkPcServices`, `checkAllServices` (named) | Internal |
+
+### Router endpoints
+
+#### `POST /pcs/:pcId` — Health-check services on a single PC
+
+Validates the PC ObjectId parameter, looks up the PC document from MongoDB (404 if not found), then delegates to `checkPcServices()` which iterates the embedded `servicios` array performing per-port TCP probes. Returns structured status data for each service.
+
+- **Handler:** `async (req, res) => { ... }`
+- **Parameters:**
+  - `params.pcId`: MongoDB ObjectId string of the target PC.
+- **Double ObjectId protection:** Preemptive `isValidObjectId(pcId)` check rejects malformed IDs with a 400 response before any database query. A catch-block fallback handles Mongoose `CastError` if one slips through for any reason.
+- **Success response (200):** `{ success: true, data: { pcId, id, services: [{ index, nombre, puerto, status }] } }` — per-service TCP probe results from `checkPcServices()`.
+- **Bad request (400):** `{ success: false, message: 'Invalid PC ID' }` — invalid ObjectId format caught by either the pre-check or CastError fallback.
+- **Not found (404):** `{ success: false, message: 'PC not found' }` — no PC document matches the given `_id`.
+- **Error response (500):** `{ success: false, message: 'Internal server error' }` — unexpected errors are logged via `console.error('[health] ...')` and returned with a safe message.
+
+#### `POST /all` — Health-check services across the entire fleet
+
+Fetches every PC document via `PC.find()` and delegates to `checkAllServices()` which runs `checkPcServices()` on each PC concurrently using `Promise.allSettled`. Individual failures do not abort the sweep — they are wrapped with an `error` field in the per-PC result. Returns an array of per-PC health summaries for the entire monitored fleet.
+
+- **Handler:** `async (req, res) => { ... }`
+- **No parameters required.**
+- **Success response (200):** `{ success: true, data: [{ pcId, id, services: [...] }, ...] }` — array of per-PC result objects from `checkAllServices()`. Each object is augmented with `pcDocIndex` (original array index). Synchronous failures within an individual PC's handler produce an `error` string field.
+- **Error response (500):** `{ success: false, message: 'Internal server error' }` — unexpected errors are logged via `console.error('[health] ...')` and returned with a safe message.
+
+### Exports
+
+| Export | Type | Description |
+|--------|------|-------------|
+| `default` | `express.Router()` | Router instance with 2 health-check endpoints mounted at `/api/health` (or equivalent path) via `server.js` |
+
+---
+
 ## 🔄 Changes in this update
 
 - **2026-06-03 — T005 Embedded Service CRUD Routes:** Added full documentation for `services.js`. This new file provides four REST endpoints (`GET /`, `POST /`, `PUT /:serviceIndex`, `DELETE /:serviceIndex`) for managing embedded service subdocuments within a PC. Services are addressed by array index (not ObjectId) and all mutations leverage Mongoose `.save()` to enforce the schema-level GPU-cap validator (`sum(gpu) ≤ vram`).
@@ -196,3 +241,7 @@ Parses the integer index, validates bounds, then splices the service from the `s
 ## 🔄 Changes in this update
 
 - **T03 — Multi-GPU support in `services.js` routes:** The POST `/api/pcs/:pcId/services` handler now pushes `assignedGpu` alongside `{ nombre, puerto, gpu }` when creating a new service. The PUT `/api/pcs/:pcId/services/:serviceIndex` handler conditionally updates the `assignedGpu` field if it is present in the request body (partial update). GET `/` endpoint success response now documents that each service subdocument includes the `assignedGpu` field. Updated the `services.js` file description and all relevant endpoint documentation.
+
+## 🔄 Changes in this update
+
+- **2026-07-11 — Added health check route (`health.js`):** New Express router providing two POST endpoints for TCP-based service health checks. `POST /pcs/:pcId` validates the ObjectId, looks up the PC, and delegates to `checkPcServices()` from `healthChecker.js`. `POST /all` fetches all PCs and delegates to `checkAllServices()` for fleet-wide sweeps. Both use double ObjectId protection (pre-check + CastError fallback) consistent with pcs.js conventions. Full per-endpoint documentation including parameters, response shapes, and error handling has been added.

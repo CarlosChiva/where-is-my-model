@@ -23,7 +23,7 @@ React source files for the GPU Infrastructure Dashboard frontend application, sc
 
 ## 📄 `App.jsx`
 
-Root React component of the GPU Infrastructure Dashboard. Orchestrates the full application: initializes all data-fetching and mutation hooks, manages modal routing via a single state object, and renders the header, responsive PC card grid, and five modal dialogs. Each mutation hook is wired to `refetch` the master PC list on success.
+Root React component of the GPU Infrastructure Dashboard. Orchestrates the full application: initializes all data-fetching and mutation hooks, a service health check hook (`useServiceHealth`) for per-service TCP status monitoring, manages modal routing via a single state object, renders two floating action buttons ("Refresh Health" and "Add PC") on the dashboard view, and renders the header, responsive PC card grid, and five modal dialogs. Each mutation hook is wired to `refetch` the master PC list on success.
 
 ### Imports and dependencies
 
@@ -38,6 +38,7 @@ Root React component of the GPU Infrastructure Dashboard. Orchestrates the full 
 | `./hooks/useCreateService.js` | `useCreateService` | Internal |
 | `./hooks/useUpdateService.js` | `useUpdateService` | Internal |
 | `./hooks/useDeleteService.js` | `useDeleteService` | Internal |
+| `./hooks/useServiceHealth.js` | `useServiceHealth` | Internal |
 | `./components/Header.jsx` | `Header` | Internal |
 | `./components/PCGrid.jsx` | `PCGrid` | Internal |
 | `./components/GpuCalculator/GPUCalculatorPage.jsx` | `GPUCalculatorPage` | Internal |
@@ -52,7 +53,8 @@ Root React component of the GPU Infrastructure Dashboard. Orchestrates the full 
 | Hook | Variable | Initial value | Role |
 |------|----------|---------------|------|
 | `useState` | `modalState` | `{ type: null, payload: null }` | Modal router — `type` determines which modal renders, `payload` carries data forwarded to it. |
-| `useState` | `currentPage` | `'dashboard'` | Page router — switches between `'dashboard'` (default) and `'calculator'` views. Changing pages also closes any open modal via `handlePageChange`. |
+| `useState` | `currentPage` | `'dashboard'` | Page router — switches between `'dashboard'` (default) and `'calculator'` views. Changing pages also closes any open modal via `handlePageChange`. Both FAB buttons are scoped to the dashboard only (`{ currentPage === 'dashboard' && ... }`). |
+| `useServiceHealth` | `serviceHealth` | — | Health check hook instance exposing `loading` (boolean), `checkAll()` (triggers TCP probes for all services across all PCs). Passed as `serviceHealth` prop to `<PCGrid>` and wired to the "Refresh Health" FAB button via `onClick={() => serviceHealth.checkAll()}`. |
 
 ### Callback handlers
 
@@ -96,7 +98,10 @@ Root React component of the GPU Infrastructure Dashboard. Orchestrates the full 
 
 The component renders:
 1. **`Header`** — server count summary, "Add PC" button, and "Export JSON" button (which internally serializes `pcs` to a timestamped JSON file download via native browser APIs).
-2. **`PCGrid`** — responsive grid of PC cards with editing, add-service, and delete actions.
+2. **`PCGrid`** — responsive grid of PC cards with editing, add-service, and delete actions. Receives `serviceHealth={serviceHealth}` for per-service TCP status display within each card.
+3. **FAB buttons** (dashboard-only):
+   * **"Refresh Health"** — positioned at `bottom-[6.5rem] right-6` (above the "Add PC" FAB). Calls `serviceHealth.checkAll()` on click. Icon (refresh/circular arrows SVG) gets a conditional `animate-spin` class when `serviceHealth.loading` is truthy, providing visual feedback during health probes. Same styling as the existing "Add PC" FAB: `w-12 h-12 md:w-14 md:h-14`, rounded, accent-coloured, with shadow and hover/active transitions.
+   * **"Add PC"** — positioned at `bottom-6 right-6`. Opens the AddPcModal via `setModalState({ type: 'addPc' })`.
 3. **Modal routing** — conditionally renders one of five modals based on `modalState.type`:
    - `'addPc'` → `AddPcModal` (receives `loading`, `error`, `clearError` from `createPcHook`)
    - `'editPc'` → `EditPcModal` (receives `loading`, `error`, `clearError` from `updatePcHook`)
@@ -216,3 +221,12 @@ Global stylesheet that activates Tailwind CSS's three-layer directive system. Se
 - **Updated** EditServiceModal rendering: now passes `pcGpus={modalState.payload.gpus ?? []}` and `pcServices={modalState.payload.services ?? []}` as data props (replacing `pcVram` / `currentGpuUsed`).
 - **Data flow chain**: PCCard.jsx → ServiceRow's onEdit callback spreads `{ pcId, index }` and attaches `{ service, gpus: pc?.gpus ?? [], services: pc?.servicios ?? [] }` → App.jsx's `handleEditService({ pcId, index, service, gpus, services })` → modal state payload → EditServiceModal receives `pcGpus` + `pcServices`. This enables the same per-GPU capacity checks and GPU assignment dropdown that AddServiceModal received in T12.
 - **Updated** "Loading/Error props passed to EditServiceModal" section: added note about the new data props (`pcGpus`, `pcServices`) enabling per-GPU validation, GPU pre-selection, and cross-GPU reassignment checks.
+
+### Service Health Check hook integration (new)
+- **Added** import of `useServiceHealth` from `./hooks/useServiceHealth.js` to App.jsx imports table.
+- **Updated** App.jsx description: now mentions the service health check hook for per-service TCP status monitoring and two floating action buttons ("Refresh Health" and "Add PC").
+- **Added** row to internal state table: `serviceHealth` from `useServiceHealth()` — exposes `loading` (boolean) and `checkAll()` method. Documented the prop flow: passed as `serviceHealth={serviceHealth}` to `<PCGrid>`, wired to the new FAB button via `onClick={() => serviceHealth.checkAll()}`.
+- **Updated** render structure PCGrid entry: now documents `serviceHealth` prop for per-service TCP status display within each card.
+- **Added** section 3 "FAB buttons" in render structure documenting both floating action buttons:
+  - **"Refresh Health"**: positioned at `bottom-[6.5rem] right-6`, dashboard-only guard, refresh SVG icon with conditional `animate-spin` on loading state, identical FAB styling to the Add PC button.
+  - **"Add PC"**: existing FAB at `bottom-6 right-6`.

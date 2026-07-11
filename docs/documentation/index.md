@@ -1,7 +1,7 @@
 # Root — Where Is My Model
 
 > Path: `/`
-> Last updated: 2026-06-07
+> Last updated: 2026-07-11
 > Type: Composite folder (project root)
 
 **Where Is My Model** is a full-stack web application that serves as a GPU infrastructure dashboard for catalogueing multi-GPU compute servers running AI inference services. The frontend lets operators see real-time VRAM occupancy via colour-coded progress bars, manage server and service inventories through CRUD operations in modal dialogs, and estimate VRAM budgets for loading large language models using an interactive calculator with seven attention-architecture variants. The backend enforces per-GPU VRAM capacity constraints at three levels (schema validator, request-body middleware, route error handling) and persists all state to MongoDB. The entire stack is containerised and orchestrated by a single `docker-compose.yml` file that brings up three services on a shared Docker bridge network: Vite dev server (frontend), Express API (backend), and MongoDB (data store).
@@ -122,17 +122,19 @@ Browser (port 3000)
 │       → fetch() → Vite proxy (/api/*)        │
 │                                             │
 └──────────────┬──────────────────────────────┘
-               │  /api/pcs, /api/pcs/:id/services
-               ▼
+                │  /api/* → Vite proxy → backend:8080
+                ▼
 ┌─────────────────────────────────────────────┐
 │  backend/ (Express on port 8080)            │
 │                                             │
 │  server.js                                  │
 │       ├── CORS middleware (CLIENT_URL list) │
 │       ├── express.json() body parser        │
+│       ├── GET /api/health (inline)           │
 │       ├── Route registration:               │
-│       │     /api/pcs/:pcId/services FIRST    │
-│       │     /api/pcs SECOND                  │
+│       │     /api/check-health FIRST          │
+│       │     /api/pcs/:pcId/services SECOND   │
+│       │     /api/pcs THIRD                   │
 │       └── Global error handler              │
 │                                             │
 │  middleware/validation.js                   │

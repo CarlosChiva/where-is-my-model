@@ -1,12 +1,19 @@
 import GPUBar from './GPUBar';
 
-function ServiceRow({ service, vramGb, index, pcId, onEdit, onDelete, gpuName }) {
+function ServiceRow({ service, vramGb, index, pcId, onEdit, onDelete, gpuName, status }) {
   const { nombre, puerto, gpu } = service;
 
   return (
     <div className="flex items-center gap-3 py-3 border-b border-border last:border-b-0">
       {/* ── Left: name + port badge + GPU assignment badge ── */}
       <div className="flex-1 min-w-0 flex items-center gap-2 shrink">
+        <span
+          className={`inline-block w-2.5 h-2.5 rounded-full shrink-0 ${
+            status === 'up'     ? 'bg-gpu-green' :
+            status === 'down'   ? 'bg-gpu-red'   :
+                                 'bg-text-muted animate-pulse'
+          }`}
+        />
         <span className="truncate text-text-primary font-medium text-[0.875rem]">
           {nombre}
         </span>

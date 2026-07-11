@@ -75,11 +75,12 @@ Browser → main.jsx (mount)
   useDeletePc               ▼
   useCreateService      Backend REST API
   useUpdateService         (/api/pcs, /api/pcs/:id/services)
-  useDeleteService
-  useServices
-       │
-       ▼
-  utils/ (validators, calculatorEngine, gpuHelpers)
+   useDeleteService
+   useServices
+   useServiceHealth  → TCP probe manager, result passed to PCGrid + wired to FAB button
+        │
+        ▼
+   utils/ (validators, calculatorEngine, gpuHelpers)
   └── shared colour coding + VRAM maths across dashboard AND calculator
 ```
 
@@ -104,7 +105,7 @@ Bootstraps the React application. Mounts the `<App />` root component into a DOM
 
 ### 📄 App.jsx
 
-Top-level application shell and orchestrator component. Owns all top-level state: the master PC list (`usePcs`), six mutation hooks for CRUD operations on PCs and services (`useCreatePc`, `useUpdatePc`, `useDeletePc`, `useCreateService`, `useUpdateService`, `useDeleteService`), a modal router state object, and the page-switching state. Provides callback handlers that bridge UI actions (from `<Header>` and `<PCGrid>`) to mutation hooks and modal state transitions. Conditionally renders either the full dashboard layout with modals or the GPU Calculator page.
+Top-level application shell and orchestrator component. Owns all top-level state: the master PC list (`usePcs`), six mutation hooks for CRUD operations on PCs and services (`useCreatePc`, `useUpdatePc`, `useDeletePc`, `useCreateService`, `useUpdateService`, `useDeleteService`), a service health check hook (`useServiceHealth`) for per-service TCP status monitoring, a modal router state object, and the page-switching state. Renders two floating action buttons on the dashboard view ("Refresh Health" and "Add PC"). Provides callback handlers that bridge UI actions (from `<Header>` and `<PCGrid>`) to mutation hooks and modal state transitions. Conditionally renders either the full dashboard layout with modals or the GPU Calculator page.
 
 #### Imports and dependencies
 
@@ -119,6 +120,7 @@ Top-level application shell and orchestrator component. Owns all top-level state
 | `./hooks/useCreateService.js` | `default` (hook) | Internal |
 | `./hooks/useUpdateService.js` | `default` (hook) | Internal |
 | `./hooks/useDeleteService.js` | `default` (hook) | Internal |
+| `./hooks/useServiceHealth.js` | `default` (hook) | Internal |
 | `./components/Header.jsx` | `default` (component) | Internal |
 | `./components/PCGrid.jsx` | `default` (component) | Internal |
 | `./components/GpuCalculator/GPUCalculatorPage.jsx` | `default` (component) | Internal |
@@ -141,7 +143,8 @@ React functional component that serves as the application shell. Manages data fl
 | `pcs`, `loading`, `refetch` (from `usePcs()`) | — | Master PC list fetched from backend, auto-refetched after any mutation via the hooks' `onSuccess` callbacks. |
 | `createPcHook`, `updatePcHook`, `deletePcHook`, `createServiceHook`, `updateServiceHook`, `deleteServiceHook` (from respective hooks) | — | Mutation hooks with `loading`, `error`, `mutate`, and `clearError`. All wired to `refetch` on success. |
 | `modalState` (`{ type, payload }`) | `{ type: null, payload: null }` | Single-object modal router; `type` determines which dialog renders, `payload` carries data to it. |
-| `currentPage` | `'dashboard'` | Page switcher between dashboard and calculator views. |
+| `currentPage` | `'dashboard'` | Page switcher between dashboard and calculator views. Both FAB buttons are guarded by `{ currentPage === 'dashboard' && ... }`. |
+| `serviceHealth` (from `useServiceHealth()`) | — | Health check hook exposing `loading` (boolean) and `checkAll()` method. Passed as the `serviceHealth` prop to `<PCGrid>` for per-service TCP status display. Wired to the "Refresh Health" FAB button via `onClick={() => serviceHealth.checkAll()}`. |
 
 **Internal functions:**
 
@@ -187,22 +190,27 @@ React functional component that serves as the application shell. Manages data fl
 ```
 <div className="min-h-screen ...">
   <Header              currentPage /> onPageChange /> pcs /> onAddPc />
-  
+
   {currentPage === 'dashboard' ? (
     <>
-      <PCGrid   pcs /> loading /> onEditPc /> onAddService /> onDeletePc />
+      <PCGrid   pcs /> loading /> serviceHealth /> onEditPc /> onAddService /> onDeletePc />
                    onEditService /> onDeleteService />
-       
+
        {/* Modal routing — one of five modals conditionally rendered */}
        {modalState.type === 'addPc'        && <AddPcModal .../>}
        {modalState.type === 'editPc'       && <EditPcModal .../>}
        {modalState.type === 'addService'   && <AddServiceModal .../>}
        {modalState.type === 'editService'  && <EditServiceModal .../>}
        {modalState.type === 'deleteConfirm' && <DeleteConfirmModal .../>}
-     </>
-   ) : (
-     <GPUCalculatorPage />
-   )}
+
+       {/* FAB: "Refresh Health" — dashboard only, bottom-[6.5rem] right-6 */}
+       {/* Calls serviceHealth.checkAll(), icon spins when loading */}
+    </>
+  ) : (
+    <GPUCalculatorPage />
+  )}
+
+  {/* FAB: "Add PC" — dashboard only, bottom-6 right-6 */}
 </div>
 ```
 
@@ -227,6 +235,12 @@ Global CSS entry point for Tailwind CSS. Imports the three standard Tailwind dir
 ### Removal of `handleSave` no-op and corresponding `onSave` prop on `<Header>`
 - **Removed** the no-op function `const handleSave = () => {}` from `App.jsx`. This callback had previously been passed as `onSave={handleSave}` to the `<Header>` component. The Header's `handleExport()` method independently performs JSON serialization and download; this orphaned parent-level callback served no purpose.
 - **Removed** the `onSave` prop from the `<Header>` JSX rendering in `App.jsx`. The `<Header>` now receives four props: `currentPage`, `onPageChange`, `pcs`, and `onAddPc`.
+
+### Service Health Check hook integration (new)
+- **Added** `useServiceHealth` to imports table and description. Hook is instantiated after mutation hooks, before modal state.
+- **Updated** internal state table: new row for `serviceHealth` documenting the exported `loading` boolean and `checkAll()` method, along with the dual wiring (prop to `<PCGrid>`, onClick on FAB button).
+- **Updated** render logic section: added `serviceHealth` prop to `<PCGrid>` signature in the render pseudocode. Added comments for both FAB buttons ("Refresh Health" at `bottom-[6.5rem] right-6` and "Add PC" at `bottom-6 right-6`), noting dashboard-only guard and spinning icon on loading state.
+- **Updated** data flow diagram: added `useServiceHealth → TCP probe manager, result passed to PCGrid + wired to FAB button` line.
 
 ### Verification of child docs (2026-06-07)
 - **utils/ subfolder** — Re-verified. Child documentation (`./src/utils.md`) was updated to confirm calculatorEngine.js source code alignment. All documented exports, validation helpers, and attention-architecture dispatch paths remain accurate.
