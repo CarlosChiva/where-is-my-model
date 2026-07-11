@@ -1,7 +1,7 @@
 # `models`
 
 > Path: `backend/models/`
-> Last updated: 2026-06-07
+> Last updated: 2026-07-11
 > Type: Leaf folder
 
 Mongoose schema definitions for the Express backend. Contains data models that map to MongoDB collections, implementing validation at both field-level and document-level for GPU server infrastructure entities. The single model defined here manages multi-GPU servers with per-GPU VRAM allocation tracking across assigned network services.
@@ -32,6 +32,9 @@ Embedded schema representing a single network service running on a GPU server. E
 | `puerto` | `Number` | Required, min 1, max 65535 |
 | `gpu` | `Number` | Required, min 0 — VRAM demand in GB |
 | `assignedGpu` | `Number` | Required, min 0 — zero-based index into the parent PC's `gpus` array |
+| `endpoint` | `String` | Optional, defaults to `null` — path portion of the HTTP health-check URL |
+| `host` | `String` | Optional, defaults to `null` — hostname or IP for external health checks |
+| `protocol` | `String` | Optional, enum `['http', 'https']`, defaults to `'http'` — protocol used for health-check requests |
 
 #### `pcSchema` *(Mongoose Schema)*
 
@@ -82,3 +85,4 @@ Top-level schema for a GPU server entity. Stores the server name, IPv4 address, 
 - **Replaced `totalGpu` virtual with `gpuUsage` virtual** — The old `totalGpu` virtual was a single number (sum of all service GPU usage). It has been replaced by `gpuUsage`, a computed array that provides a per-GPU breakdown: `{ gpuIndex, name, totalVram, usedVram }`. This permits the consumer to see which specific GPU is over-utilized.
 - **Added `gpus` field-level validator** — A new custom validator on the `gpus` path enforces that at least one GPU must be defined for every PC document.
 - **Rewrote `servicios` document-level validator** — The old validator compared total GPU usage against a single `vram` cap. The new validator performs two checks: (1) rejects services referencing non-existent GPU indices and (2) verifies per-GPU allocation does not exceed that GPU's VRAM capacity.
+- **Added optional HTTP health-check fields to `serviceSchema`** — Three new optional fields were added to support a two-layer HTTP health-check system: `endpoint` (String, nullable), `host` (String, nullable), and `protocol` (enum `'http'`/`'https'`, defaults to `'http'`). These allow each service to advertise an external health-check probe URL (`{protocol}://{host}{endpoint}`).

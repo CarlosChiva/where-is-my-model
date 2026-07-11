@@ -13,9 +13,12 @@ where-is-my-model/
 │   ├── models/
 │   │   └── PC.js                     # Schema: {nombre, ip, vram, servicios[]}, virtual totalGpu, GPU cap validator
 │   ├── routes/
-│   │   ├── pcs.js                    # GET /, GET /:id, POST /, PUT /:id, DELETE /:id
-│   │   └── services.js               # GET /, POST /, PUT /:index, DELETE /:index
-│   ├── seed.js                       # Manual seed from data.json
+    │   │   ├── pcs.js                    # GET /, GET /:id, POST /, PUT /:id, DELETE /:id
+    │   │   ├── services.js               # GET /, POST /, PUT /:index, DELETE /:index
+    │   │   └── health.js                 # [NEW] POST /check-health/pcs/:pcId, POST /check-health/all
+    │   ├── services/
+    │   │   └── healthChecker.js          # [NEW] TCP connect checker (net module, ESM)
+    │   ├── seed.js                       # Manual seed from data.json
 │   ├── server.js                     # Entry: MongoDB connect, auto-seed, route registration, listen(8080)
 │   ├── package.json
 │   └── package-lock.json
@@ -58,8 +61,9 @@ where-is-my-model/
 │       │       ├── HardwareFormSection.jsx            # 🖥️ Hardware fields group (2 number inputs)
 │       │       ├── WorkloadFormSection.jsx            # 🎯 Workload target fields group (5 number inputs)
 │       │       └── ResultsDisplay.jsx                 # Visual bars + numbers with gpu color thresholds
-│       ├── hooks/
-│       │   ├── usePcs.js             # GET all PCs on mount, refetch
+    │       ├── hooks/
+    │       │   ├── usePcs.js             # GET all PCs on mount, refetch
+    │       │   └── useServiceHealth.js   # [NEW] TCP health status state + auto-check on load
 │       │   ├── useCreatePc.js        # POST new PC
 │       │   ├── useUpdatePc.js        # PUT update PC
 │       │   ├── useDeletePc.js        # DELETE PC
@@ -67,8 +71,9 @@ where-is-my-model/
 │       │   ├── useCreateService.js   # POST service to PC
 │       │   ├── useUpdateService.js   # PUT service by index
 │       │   └── useDeleteService.js   # DELETE service by index
-│       ├── services/
-│       │   ├── apiClient.js          # Unified fetch wrapper (get, post, put, del)
+    │       ├── services/
+    │       │   ├── apiClient.js          # Unified fetch wrapper (get, post, put, del)
+    │       │   └── healthApi.js          # [NEW] checkPcHealth, checkAllHealth wrappers
 │       │   ├── pcApi.js              # fetchPcs, createPc, updatePc, deletePc
 │       │   └── serviceApi.js         # fetchServices, createService, updateService, deleteService
 │       └── utils/

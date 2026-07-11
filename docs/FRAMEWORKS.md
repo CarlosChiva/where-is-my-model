@@ -37,6 +37,8 @@
 | `POST` | `/api/pcs/:pcId/services` | Add service to PC | ✅ |
 | `PUT` | `/api/pcs/:pcId/services/:index` | Update service | ✅ |
 | `DELETE` | `/api/pcs/:pcId/services/:index` | Delete service | ✅ |
+| `POST` | `/api/check-health/pcs/:pcId` | Check all services health for a single PC (TCP) | 🔄 In progress |
+| `POST` | `/api/check-health/all` | Check all services health across all PCs (TCP) | 🔄 In progress |
 
 ## GPU Color Thresholds
 

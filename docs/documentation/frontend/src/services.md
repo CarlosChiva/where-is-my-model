@@ -4,7 +4,7 @@
 > Last updated: 2026-06-07
 > Type: Leaf folder
 
-General purpose client-side service layer for the frontend application. This folder encapsulates all HTTP communication with the backend API, providing a lightweight fetch-based client (`apiClient`) and two domain-specific API wrappers (`pcApi` for PC management and `serviceApi` for service/lifecycle management). Together they form the data-access boundary of the frontend.
+General purpose client-side service layer for the frontend application. This folder encapsulates all HTTP communication with the backend API, providing a lightweight fetch-based client (`apiClient`) and three domain-specific API wrappers: `pcApi` for PC management, `serviceApi` for service/lifecycle management, and `healthApi` for health-check operations on PCs. Together they form the data-access boundary of the frontend.
 
 ---
 

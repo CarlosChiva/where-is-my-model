@@ -1,7 +1,7 @@
 # `backend`
 
 > Path: `backend/`
-> Last updated: 2026-06-07
+> Last updated: 2026-07-11
 > Type: Composite folder
 
 Express + Mongoose REST API server that manages GPU compute servers and their assigned network services. The backend enforces per-GPU VRAM capacity constraints at the schema level (Mongoose validators), middleware level (request-body validation), and route level (error handling). Deployed as a Node.js 20 Alpine container via Docker Compose, backed by MongoDB for persistent storage. Multi-GPU servers are fully supported — each GPU is individually tracked with its own VRAM allocation pool, and services can be reassigned between GPUs on the same server via partial-update routes.
@@ -15,6 +15,7 @@ Express + Mongoose REST API server that manages GPU compute servers and their as
 | `models/` | [see docs](./models.md) | Mongoose schema definitions for the PC model (multi-GPU servers with embedded service subdocuments, per-GPU virtual fields, and document-level VRAM-cap validators). |
 | `routes/` | [see docs](./routes.md) | Express Router modules providing CRUD REST endpoints for PCs (`/api/pcs`) and nested Services (`/api/pcs/:pcId/services`), with standardized response envelopes and CastError handling. |
 | `middleware/` | [see docs](./middleware.md) | Request-body validation middleware (collect-all-errors pattern) that enforces per-GPU VRAM limits, IPv4 format checks, and backward-compatible scalar-vram-to-gpus-array transformation. |
+| `services/` | [see docs](./services.md) | Application-level services — TCP health-check utility (`healthChecker.js`) for probing the reachability of network services hosted on GPU compute servers, using only Node.js built-in `net`. |
 
 ---
 
@@ -22,7 +23,7 @@ Express + Mongoose REST API server that manages GPU compute servers and their as
 
 ### `server.js`
 
-Application entry point. Loads environment configuration, establishes the MongoDB connection via Mongoose, registers Express middleware (CORS with origin allowlist, JSON body parsing), mounts route modules in dependency-safe order (services router before PCs router to avoid parameter collision), installs a global error handler, and starts listening on the configured port.
+Application entry point. Loads environment configuration, establishes the MongoDB connection via Mongoose, registers Express middleware (CORS with origin allowlist, JSON body parsing), serves a simple inline health check (`GET /api/health`), mounts three route modules in dependency-safe order (health router at `/api/check-health` first, then services router before PCs router to avoid parameter collision), installs a global error handler, and starts listening on the configured port.
 
 ### Imports and dependencies
 
@@ -44,7 +45,7 @@ Application entry point. Loads environment configuration, establishes the MongoD
 ### Functions
 
 - **`registerRoutes() → void`** (async)
-  Dynamically imports and mounts the two route modules. Services router is registered first at `/api/pcs/:pcId/services` to prevent Express from matching `:pcId` against the word `"services"`. Each import is wrapped in try/catch so that a missing route module degrades gracefully (warns to console rather than crashing).
+  Dynamically imports and mounts three route modules in order: health router at `/api/check-health` first, services router second at `/api/pcs/:pcId/services`, and PCs router last at `/api/pcs`. The ordering prevents Express from matching `:pcId` against the literal path segments `"services"` or `"check-health"`. Each import is wrapped in try/catch so that a missing route module degrades gracefully (warns to console rather than crashing).
   - **Returns:** nothing — side-effect only (calls `app.use()` for each router)
 
 - **`start() → void`** (async)
@@ -320,4 +321,10 @@ The Dockerfile produces a single-stage Node.js 20 Alpine image. In development, 
 | `server.js` | `node server.js` or `docker compose up backend` | Main API server |
 | `seed.js` | `npm run seed` or `docker compose exec backend node seed.js` | Database initial data population from `data.json` |
 | `test-gpu-cap.js` | `node test-gpu-cap.js [BASE_URL]` | Node.js integration test for VRAM-cap enforcement |
-| `test-gpu-cap.sh` | `./test-gpu-cap.sh [BASE_URL]` | Shell-based integration test (same coverage as .js variant) |
+| `test-gpu-cap.sh` | `./test-gpu-cap.sh [BASE_URL]` | Shell-based integration test (same coverage as .js variant)
+
+---
+
+## 🔄 Changes in this update
+
+- **`server.js`** — Added health router registration inside `registerRoutes()`. A new dynamic import block loads `./routes/health.js` and mounts it at `/api/check-health`, wrapped in try/catch for graceful degradation. The health router is now the *first* registered route, preceding services and PCs routers (order: health → services → pcs). Updated code comments to document all three routers and their ordering rationale. Current documentation now reflects all three dynamically imported route modules instead of the previous two.

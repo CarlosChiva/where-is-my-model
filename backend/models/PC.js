@@ -27,6 +27,19 @@ const serviceSchema = new mongoose.Schema(
       required: [true, 'assignedGpu field is required.'],
       min: [0, 'GPU index must be >= 0.'],
     },
+    endpoint: {
+      type: String,
+      default: null,
+    },
+    host: {
+      type: String,
+      default: null,
+    },
+    protocol: {
+      type: String,
+      enum: ['http', 'https'],
+      default: 'http',
+    },
   },
   { _id: false } // Subdocuments do not need their own ObjectId
 );

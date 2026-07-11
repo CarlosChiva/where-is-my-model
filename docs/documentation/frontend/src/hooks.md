@@ -4,7 +4,7 @@
 > Last updated: 2026-06-07
 > Type: Leaf folder
 
-Custom React hooks for the GPU Infrastructure Dashboard frontend. Provides data-fetching hooks for loading the master list of GPU servers (`usePcs`) and per-server services (`useServices`), plus six mutation hooks for CRUD operations on PCs and services (create, update, delete). All hooks follow a consistent pattern: they manage `loading` and `error` state, expose an `onSuccess` callback for side effects, and return a simple object with reactive state and a mutation function.
+Custom React hooks for the GPU Infrastructure Dashboard frontend. Provides data-fetching hooks for loading the master list of GPU servers (`usePcs`) and per-server services (`useServices`), six mutation hooks for CRUD operations on PCs and services (create, update, delete), and a health-monitoring hook for per-service TCP status (`useServiceHealth`). Most CRUD hooks follow a consistent pattern: they manage `loading` and `error` state, expose an `onSuccess` callback for side effects, and return a simple object with reactive state and a mutation function.
 
 ---
 

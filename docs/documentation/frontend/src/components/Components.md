@@ -126,14 +126,18 @@ Responsive grid layout that renders a collection of `PCCard` instances for all c
 
 #### Functions
 
-- **`PCGrid(pcs: Array, loading: boolean, onEditPc: (pc) => void, onAddService: ({ pcId, gpus, servicios }) => void, onDeletePc: ({ pcId, nombre }) => void, onEditService: (payload) => void, onDeleteService: ({ pcId, index }) => void) → JSX.Element`** *(default export)*
+- **`PCGrid(pcs: Array, loading: boolean, onEditPc: (pc) => void, onAddService: ({ pcId, gpus, servicios }) => void, onDeletePc: ({ pcId, nombre }) => void, onEditService: (payload) => void, onDeleteService: ({ pcId, index }) => void, serviceHealth: Object) → JSX.Element`** *(default export)*
   Renders a responsive CSS grid section with three mutually exclusive states gated by `loading` and `pcs.length`:
   (1) loading spinner with pulsing "Loading servers..." text spanning all columns;
    (2) empty-state card reading "No servers configured yet." / "Use the + button to add your first server.";
-  (3) the full card list via `pcs.map()`. Wires through all six action callbacks to each `PCCard` instance, keyed by `pc._id`.
+  (3) the full card list via `pcs.map()`. Wires through all six action callbacks plus three health-related props to each `PCCard` instance, keyed by `pc._id`.
   - `pcs`: Full array of server documents.
   - `loading`: Boolean controlling the spinner overlay state. When truthy, blocks rendering of empty or populated content via short-circuit logic.
   - `onEditPc`, `onAddService`, `onDeletePc`, `onEditService`, `onDeleteService`: All action callbacks passed down to each `PCCard` instance verbatim.
+  - `serviceHealth`: Optional health-context object providing per-PC service-health data. Uses optional chaining (`?.`) on all derived props for safe fallback when the object is absent. Forwards three properties:
+    - `healthStatuses={serviceHealth?.statuses}` — current health status map for all PCs.
+    - `healthLoading={serviceHealth?.loading}` — boolean flag indicating whether a health check is in flight.
+    - `onCheckPc={() => serviceHealth?.checkSinglePc(pc._id)}` — zero-arg callback bound to the specific PC's `_id`, triggering a single-server health probe.
 
 ---
 
@@ -229,3 +233,11 @@ The parent App wraps the dashboard layout shown above. When an action callback f
 - **Added** Tailwind active/inactive styling to the tab configuration table.
 - **Corrected** architecture diagram: replaced "Export JSON → Blob download" annotation with accurate description ("Add PC button (dashboard-only)").
 -    **Updated** `PCGrid.jsx` documentation to precisely describe the current empty-state copy ("No servers configured yet." / "Use the + button to add your first server.") and three-way conditional rendering logic.
+
+### Health passthrough — PCGrid.jsx forwards service-health context
+- **Updated** `PCGrid.jsx` signature: added `serviceHealth` to destructured parameters (line 3). This object is supplied by the parent App-level health-check hook.
+- **Three new props forwarded per `<PCCard>`**:
+  - `healthStatuses={serviceHealth?.statuses}` — map of health statuses keyed by PC ID.
+  - `healthLoading={serviceHealth?.loading}` — global loading flag for in-flight bulk health checks.
+  - `onCheckPc={() => serviceHealth?.checkSinglePc(pc._id)}` — per-PC bound callback for on-demand single-server health probes.
+- All three use optional chaining (`?.`) so the component renders safely when the hook has not yet initialized or the prop is omitted. No breaking change.

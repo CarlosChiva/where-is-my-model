@@ -9,6 +9,7 @@ import useServices      from './hooks/useServices.js';
 import useCreateService from './hooks/useCreateService.js';
 import useUpdateService from './hooks/useUpdateService.js';
 import useDeleteService from './hooks/useDeleteService.js';
+import useServiceHealth from './hooks/useServiceHealth.js';
 
 /* ── UI Components ─────────────────────────────────────────── */
 import Header               from './components/Header.jsx';
@@ -32,6 +33,9 @@ export default function App() {
   const createServiceHook  = useCreateService({ onSuccess: refetch });
   const updateServiceHook  = useUpdateService({ onSuccess: refetch });
   const deleteServiceHook  = useDeleteService({ onSuccess: refetch });
+
+  /* ── Health check hook — per-service TCP status manager ─── */
+  const serviceHealth      = useServiceHealth();
 
   /*
    * State: Modal router — single object pattern.
@@ -171,6 +175,7 @@ export default function App() {
           <PCGrid
             pcs={pcs}
             loading={loading}
+            serviceHealth={serviceHealth}
             onEditPc={(pc) => setModalState({ type: 'editPc', payload: pc })}
             onAddService={handleAddService}
             onDeletePc={handleDeletePc}
@@ -241,6 +246,36 @@ export default function App() {
         </>
       ) : (
         <GPUCalculatorPage />
+      )}
+
+      {/* Floating "Refresh Health" button — dashboard only */}
+      {currentPage === 'dashboard' && (
+        <button
+          type="button"
+          onClick={() => serviceHealth.checkAll()}
+          aria-label="Refresh service health"
+          className="fixed bottom-[6.5rem] right-6 z-40 w-12 h-12 md:w-14 md:h-14 rounded-full bg-accent text-bg-primary shadow-fab hover:bg-accent-hover active:scale-95 transition-all flex items-center justify-center focus:outline-none focus:ring-[0_0_0_3px] focus:ring-accent-dim"
+        >
+          <span className={serviceHealth.loading ? 'animate-spin' : ''}>
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M21 2v6h-6" />
+              <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+              <path d="M3 22v-6h6" />
+              <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+            </svg>
+          </span>
+        </button>
       )}
 
       {/* Floating "Add PC" button — dashboard only */}
