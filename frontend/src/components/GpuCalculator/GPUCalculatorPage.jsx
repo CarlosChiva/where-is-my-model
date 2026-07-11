@@ -51,7 +51,15 @@ attention_k_eq_v:           false,
 num_attention_layers:       '16',
 deltanet_num_heads:         '16',
 deltanet_head_dim:          '256',
+// Linear Attention
+linear_num_heads: '16',
+linear_head_dim: '256',
 
+// Mamba / RWKV
+state_size: '64',
+
+// Hybrid Mamba
+hybrid_state_size: '64',
 
 };
 
@@ -91,6 +99,11 @@ const kvCachePerSeqGB = calculateKvCachePerSeqGB(
   formState.num_attention_layers,
   formState.deltanet_num_heads,
   formState.deltanet_head_dim,
+  formState.linear_num_heads,
+formState.linear_head_dim,
+formState.state_size,
+formState.hybrid_state_size,
+formState.hidden_size,
 );
 
   const totalKvCacheGB  = calculateTotalKvCacheGB(

@@ -10,13 +10,19 @@
  *   index       — Array index for stagger animation delay
  *   onEditPc    — (pc) => void        Called when Edit PC is clicked
  *   onAddService— ({ pcId, gpus, servicios }) => void  Called when Add Service is clicked
- *   onDeletePc  — ({ pcId, nombre }) => void  Called when Delete PC is clicked
+ *   onDeletePp  — ({ pcId, nombre }) => void  Called when Delete PC is clicked
+ *   healthStatuses — Object keyed by "pcId---serviceIndex" with values 'up'|'down'|null
+ *   healthLoading  — Boolean indicating whether a health check is in flight
+ *   onCheckPc    — () => Promise<void>  Called when per-PC health check is requested
  */
 import ServiceRow from './ServiceRow';
 import GPUDetails from './GPUDetails';
 import { computeGpuUsage } from '../utils/gpuHelpers.js';
 
-export default function PCCard({ pc, index, onEditPc, onAddService, onDeletePc, onEditService, onDeleteService }) {
+export default function PCCard({
+  pc, index, onEditPc, onAddService, onDeletePc, onEditService, onDeleteService,
+  healthStatuses = {}, healthLoading = false, onCheckPc
+}) {
   const services = pc?.servicios ?? [];
   const gpus     = pc?.gpus ?? [];
   const gpuUsage = computeGpuUsage(gpus, services);
@@ -50,6 +56,9 @@ export default function PCCard({ pc, index, onEditPc, onAddService, onDeletePc, 
           const resolvedVramGb = serviceGpuData?.totalVram ?? 0;
           const resolvedGpuName = serviceGpuData?.name ?? null;
 
+          const healthKey = `${pc?._id}---${i}`;
+          const serviceStatus = healthStatuses[healthKey] ?? null;
+
           return (
             <ServiceRow
               key={i}
@@ -60,6 +69,7 @@ export default function PCCard({ pc, index, onEditPc, onAddService, onDeletePc, 
               index={i}
               onEdit={(editPayload) => onEditService({ ...editPayload, service, gpus, services })}
               onDelete={onDeleteService}
+              status={serviceStatus}
             />
           );
         })}
@@ -95,6 +105,32 @@ export default function PCCard({ pc, index, onEditPc, onAddService, onDeletePc, 
           onClick={() => onDeletePc({ pcId: pc?._id, nombre: pc?.nombre })}
         >
           ✕ Delete PC
+        </button>
+        <button
+          type="button"
+          className="border border-text-secondary text-text-secondary p-2 rounded-md hover:bg-bg-input transition-colors disabled:opacity-50"
+          aria-label={`Check services on ${pc?.nombre ?? ''}`}
+          title="Check Services"
+          disabled={healthLoading}
+          onClick={() => onCheckPc?.()}
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={healthLoading ? 'animate-spin' : ''}
+          >
+            <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+            <path d="M3 3v5h5" />
+            <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+            <path d="M16 16h5v5" />
+          </svg>
         </button>
       </div>
     </div>

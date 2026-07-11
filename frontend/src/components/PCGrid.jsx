@@ -1,6 +1,6 @@
 import PCCard from './PCCard';
 
-function PCGrid({ pcs, loading, onEditPc, onAddService, onDeletePc, onEditService, onDeleteService }) {
+function PCGrid({ pcs, loading, onEditPc, onAddService, onDeletePc, onEditService, onDeleteService, serviceHealth }) {
   return (
     <section className="mt-8 md:mt-10 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
       {loading && (
@@ -28,6 +28,9 @@ function PCGrid({ pcs, loading, onEditPc, onAddService, onDeletePc, onEditServic
               onDeletePc={onDeletePc}
               onEditService={onEditService}
               onDeleteService={onDeleteService}
+              healthStatuses={serviceHealth?.statuses}
+              healthLoading={serviceHealth?.loading}
+              onCheckPc={() => serviceHealth?.checkSinglePc(pc._id)}
             />
           ))}
         </>
