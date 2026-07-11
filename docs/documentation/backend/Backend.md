@@ -230,6 +230,8 @@ Node.js project manifest. Declares the backend as an ES module (`"type": "module
 | `mongoose` | `^8.9.0` | MongoDB ODM — schema definition, validation, model queries |
 | `cors` | ^2.8.5` | Cross-Origin Resource Sharing — origin-restricted preflight support |
 | `dotenv` | `^16.4.0` | Environment variable loading from `.env.development` |
+| `bcryptjs` | `^3.0.3` | Password hashing for user authentication (pre-save hook in User model) |
+| `jsonwebtoken` | `^9.0.3` | JSON Web Token generation and verification for session-based auth |
 
 ---
 
@@ -243,6 +245,8 @@ Environment configuration file loaded by `server.js` (via `dotenv.config({ path:
 | `PORT` | `8080` | HTTP listening port |
 | `MONGODB_URI` | `mongodb://mongo:27017/where-is-my-model` | MongoDB URI — uses Docker Compose service name `mongo` for container-to-container networking |
 | `CLIENT_URL` | `http://localhost:3000` | Frontend origin for CORS allowlist |
+| `JWT_SECRET` | `dev-secret-x7k9m2p4q8w1v5n3b6t0f-yJzRcAsDgHjKmL` | Secret key used to sign and verify JSON Web Tokens for authentication. **This value is dev-only and must be replaced with a strong random value in production.** |
+| `JWT_EXPIRES_IN` | `1d` | Token lifetime — all JWTs expire after 24 hours once issued |
 
 ---
 
@@ -261,6 +265,69 @@ Docker build-context exclusion list. Prevents `node_modules/`, environment files
 | `.vscode/`, `.idea/` | IDE project configuration directories |
 
 ---
+
+## 🔐 Authentication infrastructure (new)
+
+The backend has been instrumented with the foundational components for JWT-based user authentication. Two new production dependencies have been added to `package.json` (`bcryptjs@^3.0.3`, `jsonwebtoken@^9.0.3`), and two corresponding environment variables are present in `.env.development` (`JWT_SECRET`, `JWT_EXPIRES_IN`).
+
+### What exists now
+
+| Component | File / Location | Status |
+|-----------|----------------|--------|
+| **User Mongoose model** | `models/User.js` | ✅ Implemented |
+| **Password hashing (pre-save hook)** | `models/User.js` — `bcryptjs` with 10 salt rounds | ✅ Implemented |
+| **JWT secret and expiry env vars** | `.env.development` | ✅ Configured |
+| **Auth dependencies** | `package.json` — `bcryptjs`, `jsonwebtoken` | ✅ Installed |
+| **Auth middleware** | `middleware/auth.js` | ✅ Active — verifies Bearer JWT, attaches payload to `req.user` |
+| **Auth routes** | `routes/auth.js` | ✅ Active — exposes `/api/auth/register`, `/api/auth/login`, `/api/auth/me` |
+
+### Planned authentication flow
+
+```
+Client                          Backend                        MongoDB
+  │                                │                               │
+  ├─ POST /api/auth/register ────→ │                               │
+  │   { username, password }       ├─ hash(password) with bcryptjs →│ User.create()
+  │                                ├─ sign JWT(payload, JWT_SECRET) │
+  │   ← { success: true,          │                               │
+  │        token, user } ◀────────┤                               │
+  │                                │                               │
+  ├─ POST /api/auth/login    ────→ │                               │
+  │   { username, password }       ├─ User.findOne(username) ──────→│ .select('password')
+  │                                │ ← user doc                        │
+  │                                ├─ user.comparePassword()        │
+  │                                ├─ sign JWT(payload, JWT_SECRET) │
+  │   ← { success: true,          │                               │
+  │        token, user } ◀────────┤                               │
+  │                                │                               │
+  ├─ GET /api/auth/me            ─→ │                               │
+  │   Authorization: Bearer <jwt>  ├─ verify(token, JWT_SECRET)    │
+  │                                ├─ User.findById(userId) ───────→│ (no .select('password'))
+  │   ← { success: true,         │ ← user doc                       │
+  │        user } ◀──────────────┤                               │
+```
+
+### Pending endpoints
+
+These three routes are the next items in development. They will be added to `routes/auth.js` and mounted at `/api/auth`:
+
+| Method | Path | Purpose | Auth required? |
+|--------|------|---------|----------------|
+| `POST` | `/api/auth/register` | Create a new user account; hashes password, signs JWT, returns token + profile | No (public) |
+| `POST` | `/api/auth/login` | Authenticate with username/password; compares bcrypt hash, signs JWT, returns token + profile | No (public) |
+| `GET` | `/api/auth/me` | Return the authenticated user's profile based on the decoded JWT payload | Yes (JWT required) |
+
+### Role-based access control (planned)
+
+The User model supports two roles:
+
+| Role | Intended permission scope |
+|------|--------------------------|
+| `'admin'` | Full CRUD access to PCs, services, and health probes |
+| `'user'` | Read-only access to PCs and services; may be restricted from destructive operations |
+
+Role enforcement is not yet implemented; it will be added via the future `middleware/auth.js` middleware applied to protected routes.
+
 
 ## Architecture overview
 
@@ -328,3 +395,6 @@ The Dockerfile produces a single-stage Node.js 20 Alpine image. In development, 
 ## 🔄 Changes in this update
 
 - **`server.js`** — Added health router registration inside `registerRoutes()`. A new dynamic import block loads `./routes/health.js` and mounts it at `/api/check-health`, wrapped in try/catch for graceful degradation. The health router is now the *first* registered route, preceding services and PCs routers (order: health → services → pcs). Updated code comments to document all three routers and their ordering rationale. Current documentation now reflects all three dynamically imported route modules instead of the previous two.
+- **T001 — Auth dependencies installed** — Added `bcryptjs@^3.0.3` and `jsonwebtoken@^9.0.3` to production dependencies in `package.json`. Updated dependencies table accordingly.
+- **T002 — JWT environment variables added** — New variables `JWT_SECRET` (dev signing key) and `JWT_EXPIRES_IN=1d` appended to `.env.development`. Updated env vars table with both entries.
+- **T003 — Auth infrastructure section added** — New "Authentication infrastructure" section documenting the User model, password hashing pipeline, planned JWT-based auth flow, pending endpoints (`/api/auth/register`, `/api/auth/login`, `/api/auth/me`), and role-based access control design.

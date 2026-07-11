@@ -90,8 +90,9 @@ Lockfile that records which external agent skills are installed in this project 
 | **Build tool** | Vite 5+ (ESM, HMR) | Fast dev server, production bundler |
 | **Styling** | Tailwind CSS | Utility-first classes applied directly in JSX templates |
 | **Backend framework** | Express 4.x | RESTful HTTP API, routing, middleware pipelines |
+| **Authentication** | bcryptjs + jsonwebtoken | Password hashing (pre-save hook), JWT signing/verification for session management |
 | **ODM** | Mongoose 8.x | Schema definitions, validation MongoDB queries |
-| **Database** | MongoDB 7 | Persistent document storage for PC inventory and nested services |
+| **Database** | MongoDB 7 | Persistent document storage for PC inventory, user accounts, and nested services |
 | **Container orchestration** | Docker Compose v3.9 | Three-service stack on a bridge network |
 
 ### Full client–server data flow
@@ -147,8 +148,17 @@ Browser (port 3000)
 │         servicios subdocuments, per-GPU      │
 │         virtual fields, VRAM-cap validators  │
 │                                             │
+│  models/User.js ⭐ NEW                       │
+│       → Authenticated user model             │
+│         bcryptjs pre-save password hashing   │
+│         role-based access (admin / user)     │
+│                                             │
 │  routes/ (Express Routers)                  │
 │       → MongoDB CRUD via PC model            │
+│                                             │
+│  🔜 routes/auth.js (pending)                │
+│       → POST /register, /login              │
+│       → GET  /me (JWT-protected)            │
 │                                             │
 └──────────────┬──────────────────────────────┘
                │  Mongoose connection string:
@@ -164,6 +174,15 @@ Browser (port 3000)
 │       ├── gpus          [{ name, vram }]    │
 │       └── servicios     [{ nombre, puerto,  │
 │                           gpu, assignedGpu}] │
+│                                             │
+│  ⭐ Collection: "users" (NEW)                │
+│       ├── username      (string, unique,    │
+│       │                 3-64 chars)          │
+│       ├── password      (string, hashed     │
+│       │                 with bcryptjs,       │
+│       │                 select: false)       │
+│       └── role          (enum: admin/user,  │
+│                         default: user)      │
 │                                             │
 │  Volume: mongo-data:/data/db (persistent)   │
 └─────────────────────────────────────────────┘
@@ -182,6 +201,8 @@ Browser (port 3000)
 5. **GPU calculator** — Independent of the CRUD flow, the calculator page (`GPUCalculatorPage.jsx`) imports the same utility functions from `utils/` that power dashboard visuals (`gpuHelpers.js` for colour coding/clamping, `calculatorEngine.js` for VRAM estimation across seven attention architectures). This ensures the numbers shown in the calculator match the visualisation on the dashboard.
 
 6. **Data seeding and testing** — `seed.js` in the backend reads a flat `data.json` from the repository root, transforms it into Mongoose-compatible documents, and populates the `pcs` collection. Two integration tests (`test-gpu-cap.js` and `target: test-gpu-cap.sh`) exercise the VRAM capacity enforcement end-to-end with auto-cleanup.
+
+7. **Authentication layer** — The backend is instrumented for JWT-based session authentication. A new `User` Mongoose model (`models/User.js`) stores accounts in a separate `users` MongoDB collection, with passwords hashed via `bcryptjs` (10 salt rounds) in a pre-save hook and verified via an instance method `comparePassword()`. Two new production dependencies (`bcryptjs`, `jsonwebtoken`) are installed. JWT signing key (`JWT_SECRET`) and token lifetime (`JWT_EXPIRES_IN=1d`) are configured in `.env.development`. The auth middleware (`middleware/auth.js`) and auth routes (`routes/auth.js` with `/api/auth/register`, `/api/auth/login`, `/api/auth/me`) are the next items in development, once implemented they will sit between the existing CORS/body-parser middleware and the PC/service route handlers.
 
 ---
 
@@ -206,3 +227,12 @@ Browser (port 3000)
 | Startup ordering, networking, volumes | `docker-compose.yml` (above) |
 | VRAM calculator algorithm details | `frontend/src/utils/calculatorEngine.js` (documented in [Src.md](./frontend/src/Src.md) under `utils/`) |
 | Per-GPU capacity enforcement chain | Spans `backend/middleware/`, `backend/models/`, and `backend/routes/` (all documented in [Backend.md](./backend/Backend.md)) |
+| Authentication system (models, JWT config, pending routes) | `backend/models/User.js`, `backend/.env.development` (see [Backend.md](./backend/Backend.md) under "Authentication infrastructure") |
+
+---
+
+## 🔄 Changes in this update
+
+- **T001 — Auth dependencies installed:** Added `bcryptjs@^3.0.3` and `jsonwebtoken@^9.0.3` to the technology stack summary table. Both packages are now production dependencies in `backend/package.json`.
+- **T002 — JWT environment variables:** Documented new env vars `JWT_SECRET` and `JWT_EXPIRES_IN=1d` as configuration backing the authentication layer.
+- **T003 — Authentication system overview:** Added the "users" MongoDB collection to the architecture diagram (with schema fields), added User.js model reference with auth routes and middleware notes in the backend section of the diagram, added paragraph #7 ("Authentication layer") to "How the pieces fit together", and added a quick-reference row pointing to Backend.md's authentication infrastructure section.

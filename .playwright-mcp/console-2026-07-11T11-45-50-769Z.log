@@ -1,0 +1,10 @@
+[      27ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:3000/node_modules/.vite/deps/react-dom_client.js?v=58a4809b:14336
+[   35519ms] [ERROR] React has detected a change in the order of Hooks called by %s. This will lead to bugs and errors if not fixed. For more information, read the Rules of Hooks: https://react.dev/link/rules-of-hooks
+
+   Previous render            Next render
+   ------------------------------------------------------
+%s   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ App 1. useContext                 useContext
+2. undefined                  useState
+ @ http://localhost:3000/node_modules/.vite/deps/react-dom_client.js?v=58a4809b:4178
+[   35520ms] [ERROR] Internal React error: Expected static flag was missing. Please notify the React team. @ http://localhost:3000/node_modules/.vite/deps/react-dom_client.js?v=58a4809b:4237

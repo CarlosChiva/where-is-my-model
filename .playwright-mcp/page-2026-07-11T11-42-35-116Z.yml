@@ -1,0 +1,64 @@
+- generic [ref=e20]:
+  - banner [ref=e21]:
+    - generic [ref=e22]:
+      - heading "Where Is My Model" [level=1] [ref=e23]
+      - generic [ref=e24]: 1 servers, 4 services
+      - navigation "Page navigation" [ref=e25]:
+        - tab "Dashboard" [selected] [ref=e26] [cursor=pointer]
+        - tab "Model Calculator" [ref=e27] [cursor=pointer]
+  - generic [ref=e29]:
+    - generic [ref=e30]:
+      - heading "yo" [level=2] [ref=e31]
+      - generic [ref=e32]: 192.168.1.101
+    - paragraph [ref=e34]: 4 services running
+    - generic [ref=e35]:
+      - generic [ref=e36]:
+        - generic [ref=e37]:
+          - generic [ref=e39]: ollama
+          - generic [ref=e40]: "11434"
+          - generic [ref=e41]: "gpu: GPU 1"
+        - progressbar [ref=e44]
+        - generic [ref=e45]:
+          - button "Edit service ollama" [ref=e46] [cursor=pointer]
+          - button "Delete service ollama" [ref=e50] [cursor=pointer]
+      - generic [ref=e54]:
+        - generic [ref=e55]:
+          - generic [ref=e57]: comfy
+          - generic [ref=e58]: "8188"
+          - generic [ref=e59]: "gpu: GPU 1"
+        - progressbar [ref=e62]
+        - generic [ref=e63]:
+          - button "Edit service comfy" [ref=e64] [cursor=pointer]
+          - button "Delete service comfy" [ref=e68] [cursor=pointer]
+      - generic [ref=e72]:
+        - generic [ref=e73]:
+          - generic [ref=e75]: openweb
+          - generic [ref=e76]: "8080"
+          - generic [ref=e77]: "gpu: GPU 1"
+        - generic [ref=e79]:
+          - progressbar
+        - generic [ref=e80]:
+          - button "Edit service openweb" [ref=e81] [cursor=pointer]
+          - button "Delete service openweb" [ref=e85] [cursor=pointer]
+      - generic [ref=e89]:
+        - generic [ref=e90]:
+          - generic [ref=e92]: it-toola
+          - generic [ref=e93]: "8081"
+          - generic [ref=e94]: "gpu: GPU 1"
+        - generic [ref=e96]:
+          - progressbar
+        - generic [ref=e97]:
+          - button "Edit service it-toola" [ref=e98] [cursor=pointer]
+          - button "Delete service it-toola" [ref=e102] [cursor=pointer]
+    - generic [ref=e108]:
+      - generic [ref=e109]:
+        - generic [ref=e110]: GPU 1
+        - generic [ref=e111]: 32.0 / 32 GB (100%)
+      - progressbar [ref=e113]
+    - generic [ref=e114]:
+      - button "Edit server yo" [ref=e115] [cursor=pointer]: ✏ Edit PC
+      - button "Add service to yo" [ref=e116] [cursor=pointer]: ＋ Add Service
+      - button "Delete server yo" [ref=e117] [cursor=pointer]: ✕ Delete PC
+      - button "Check services on yo" [ref=e118] [cursor=pointer]
+  - button "Refresh service health" [ref=e124] [cursor=pointer]
+  - button "Add PC" [ref=e131] [cursor=pointer]
