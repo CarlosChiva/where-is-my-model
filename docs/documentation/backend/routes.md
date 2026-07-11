@@ -1,7 +1,7 @@
 # `routes`
 
 > Path: `backend/routes/`
-> Last updated: 2026-06-07
+> Last updated: 2026-07-11
 > Type: Leaf folder
 
 Express route modules for the API server. Each file exports a single `express.Router()` instance with RESTful endpoints, unified error handling, and standardized `{ success, data? }` response envelopes.
@@ -10,7 +10,7 @@ Express route modules for the API server. Each file exports a single `express.Ro
 
 ## 📄 `pcs.js`
 
-REST router for PC CRUD operations against MongoDB. Default-exports an Express `Router` with five endpoints covering list, retrieve, create, update, and delete operations on GPU server entities. All responses follow a standard envelope: `{ success: boolean, data?: any, message?: string, errors?: string[] }`. Mongoose validation errors are caught and extracted into a human-readable array; CastError exceptions (invalid ObjectId format) return 400 with a descriptive message; generic errors are logged to console and returned as 500 with a safe message.
+REST router for PC CRUD operations against MongoDB. Default-exports an Express `Router` with five endpoints covering list, retrieve, create, update, and delete operations on GPU server entities. Under the multi-GPU data model, each PC has a `gpus: [{ name, vram }]` array (at least one required) replacing the legacy single `vram` field. All responses follow a standard envelope: `{ success: boolean, data?: any, message?: string, errors?: string[] }`. Mongoose validation errors are caught and extracted into a human-readable array; CastError exceptions (invalid ObjectId format) return 400 with a descriptive message; generic errors are logged to console and returned as 500 with a safe message.
 
 ### Imports and dependencies
 
@@ -44,30 +44,30 @@ Retrieves a single PC document by MongoDB `_id`. Uses `PC.findById()` followed b
 
 #### `POST /` — Create new PC
 
-Creates a new PC document. Accepts `nombre`, `ip`, and `vram` from the request body. The `servicios` field defaults to an empty array via the Mongoose schema definition.
+Creates a new PC document. Accepts `nombre`, `ip`, and `gpus` from the request body. The `servicios` field defaults to an empty array via the Mongoose schema definition. The multi-GPU `gpus` array must contain at least one GPU object `{ name, vram }`.
 
-- **Middleware:** `validatePcBody` — validates request body before handler execution (checks `nombre` non-empty string, `ip` valid IPv4 format with octet range 0-255, `vram` number ≥ 1).
+- **Middleware:** `validatePcBody` — validates request body before handler execution (checks `nombre` non-empty string, `ip` valid IPv4 format with octet range 0-255, `gpus` array with at least one GPU object `{ name, vram }`).
 - **Handler:** `async (req, res) => { ... }`
 - **Request body:**
   - `nombre`: Server name (`string`, required by model).
   - `ip`: IPv4 address (`string`, required, validated by schema regex).
-  - `vram`: Total VRAM capacity in GB (`number`, required).
+  - `gpus`: Array of GPU objects `{ name: string, vram: number }` (at least one required by model schema).
 - **Success response (201):** `{ success: true, data: { <saved PC document> } }`
 - **Validation error (400):** `{ success: false, errors: [string, ...] }` — array of validation messages from `validatePcBody` middleware or Mongoose validation errors.
 - **Error response (500):** `{ success: false, message: 'Internal server error' }`
 
 #### `PUT /:id` — Update existing PC
 
-Updates metadata fields (`nombre`, `ip`, `vram`) of an existing PC. Runs Mongoose validators on the updated fields via `{ runValidators: true }`. Returns the updated document with `{ new: true }`.
+Updates metadata fields (`nombre`, `ip`, `gpus`) of an existing PC. Runs Mongoose validators on the updated fields via `{ runValidators: true }`. Returns the updated document with `{ new: true }`.
 
-- **Middleware:** `validatePcBody` — validates request body before handler execution (checks `nombre` non-empty string, `ip` valid IPv4 format with octet range 0-255, `vram` number ≥ 1).
+- **Middleware:** `validatePcBody` — validates request body before handler execution (checks `nombre` non-empty string, `ip` valid IPv4 format with octet range 0-255, `gpus` array with at least one GPU object `{ name, vram }`).
 - **Handler:** `async (req, res) => { ... }`
 - **Parameters:**
   - `params.id`: MongoDB ObjectId string.
 - **Request body:**
   - `nombre`: Updated server name (`string`).
   - `ip`: Updated IPv4 address (`string`).
-  - `vram`: Updated VRAM capacity in GB (`number`).
+  - `gpus`: Updated array of GPU objects `{ name: string, vram: number }`.
 - **Success response (200):** `{ success: true, data: { <updated PC document> } }`
 - **Bad request (400):** `{ success: false, message: 'Invalid PC ID format.' }` — CastError from invalid ObjectId string
 - **Not found (404):** `{ success: false, message: 'PC not found' }`
@@ -96,7 +96,7 @@ Deletes a PC document by `_id`. Embedded `servicios` subdocuments are removed au
 
 ## 📄 `services.js`
 
-REST router for embedded Service CRUD operations within a given PC. Default-exports an Express `Router` with four endpoints covering list, create, update, and delete operations on the `pc.servicios[]` subdocument array. Services are identified by **array index** (not ObjectId) because they are defined with `_id: false` in the Mongoose schema. All mutations use live Mongoose documents (non-lean) so that `.save()` triggers the document-level GPU-cap validator (`path('servicios')` validator enforcing `sum(gpu) ≤ vram`). Responses follow the same envelope as `pcs.js`: `{ success: boolean, data?: ..., errors?: string[], message?: string }`. CastError exceptions (invalid ObjectId format) are caught and return 400 with a descriptive message.
+REST router for embedded Service CRUD operations within a given PC. Default-exports an Express `Router` with four endpoints covering list, create, update, and delete operations on the `pc.servicios[]` subdocument array. Services are identified by **array index** (not ObjectId) because they are defined with `_id: false` in the Mongoose schema. All mutations use live Mongoose documents (non-lean) so that `.save()` triggers the document-level GPU-cap validator (`path('servicios')` validator enforcing per-GPU capacity: `sum(svc.gpu where assignedGpu===i) ≤ gpus[i].vram`). Responses follow the same envelope as `pcs.js`: `{ success: boolean, data?: ..., errors?: string[], message?: string }`. CastError exceptions (invalid ObjectId format) are caught and return 400 with a descriptive message.
 
 ### Imports and dependencies
 
@@ -122,7 +122,7 @@ Returns the `pc.servicios` array for the PC identified by `req.params.pcId` (inh
 
 #### `POST /` — Add a service to a PC
 
-Pushes a new service subdocument (`nombre`, `puerto`, `gpu`, `assignedGpu`) onto the PC's `servicios` array, then calls `pc.save()` which fires the document-level validator checking that `sum(servicios[].gpu) ≤ pc.vram`. Returns 201 on success; returns 400 with an errors array if the GPU cap is exceeded (caught as `ValidationError`). The `assignedGpu` field identifies which of the PC's GPUs the service is bound to, enabling per-GPU capacity tracking.
+Pushes a new service subdocument (`nombre`, `puerto`, `gpu`, `assignedGpu`) onto the PC's `servicios` array, then calls `pc.save()` which fires the document-level per-GPU validator: `sum(svc.gpu where assignedGpu===i) ≤ gpus[i].vram`. Returns 201 on success; returns 400 with an errors array if any GPU cap is exceeded (caught as `ValidationError`). The `assignedGpu` field identifies which of the PC's GPUs the service is bound to, enabling per-GPU capacity tracking.
 
 - **Middleware:** `validateServiceBody` — validates request body before handler execution (checks required fields and types for `nombre`, `puerto`, `gpu`, `assignedGpu`; enforces per-GPU cap against `pc.gpus[assignedGpu].vram`).
 - **Handler:** `async (req, res) => { ... }`
@@ -245,3 +245,9 @@ Fetches every PC document via `PC.find()` and delegates to `checkAllServices()` 
 ## 🔄 Changes in this update
 
 - **2026-07-11 — Added health check route (`health.js`):** New Express router providing two POST endpoints for TCP-based service health checks. `POST /pcs/:pcId` validates the ObjectId, looks up the PC, and delegates to `checkPcServices()` from `healthChecker.js`. `POST /all` fetches all PCs and delegates to `checkAllServices()` for fleet-wide sweeps. Both use double ObjectId protection (pre-check + CastError fallback) consistent with pcs.js conventions. Full per-endpoint documentation including parameters, response shapes, and error handling has been added.
+
+## 🔄 Changes in this update
+
+- **2026-07-11 — Multi-GPU `vram` → `gpus` alignment in docs:** Updated all references to the legacy single-GPU `vram` field in `pcs.js` documentation. POST `/api/pcs` and PUT `/api/pcs/:id` now correctly document request body as `{ nombre, ip, gpus }` with the multi-GPU schema `{ name: string, vram: number }[]`. Middleware descriptions, file-level description, and per-endpoint request/response bodies all updated.
+- **2026-07-11 — Per-GPU validator description in `services.js`:** The GPU-cap validator description now accurately reflects the multi-GPU constraint: `sum(svc.gpu where assignedGpu===i) ≤ gpus[i].vram` instead of the legacy single-GPU formula `sum(gpu) ≤ vram`.
+- **2026-07-11 — `health.js` param name fix:** Source corrected from `req.params.pcid` to `req.params.pcId` on line 14 to match the route pattern `:pcId` (case-sensitive). Documentation was already describing `params.pcId`, so no structural change needed — this entry records the source alignment.

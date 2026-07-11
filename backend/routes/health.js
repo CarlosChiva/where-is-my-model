@@ -11,7 +11,7 @@ const router = express.Router();
 
 router.post('/pcs/:pcId', async (req, res) => {
   try {
-    const pcId = req.params.pcid;
+    const pcId = req.params.pcId;
 
     /* Reject non-ObjectIds before hitting the database               */
     if (!isValidObjectId(pcId)) {
