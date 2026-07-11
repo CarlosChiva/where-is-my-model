@@ -1,7 +1,7 @@
 # `components`
 
 > Path: `frontend/src/components/`
-> Last updated: 2026-06-07
+> Last updated: 2026-07-11
 > Type: Composite folder
 
 React UI components for the GPU Infrastructure Dashboard. Contains six presentational components (Header, GPUBar, GPUDetails, ServiceRow, PCCard, PCGrid) that follow a strict unidirectional data-flow pattern: they receive data and callbacks as props, perform no data fetching, and delegate all mutations back to the root `App.jsx`. Includes a `Modals/` subfolder with five modal-dialog components for data-entry, editing, and deletion confirmations.
@@ -86,6 +86,8 @@ Renders an animated horizontal progress bar showing GPU VRAM utilization percent
 - `isWarning`: `percent > 80` — triggers pulsing warning glow animation.
 
 **Animated fill mechanism:** The inner `<div>` uses a CSS custom property (`--gpu-target-width: ${percent}%`) together with an explicit inline style `width: '0%'`. The `'0%'` value prevents React from collapsing the bar to zero width during re-renders (when component state triggers a full re-render rather than an incremental update). The CSS transition on the element gradually animates `width` from its CSS-initial `0%` to the target defined by `--gpu-target-width`, producing a smooth fill effect. Without the explicit `width: '0%'`, React could re-apply the previously computed inline width and skip the animation or cause a visual flicker.
+
+**Warning pulse placement (fixed):** The `animate-gpu-warning` pulsing glow class is applied to the *outer container* `<div>` (the track/background bar), not the inner fill `<div>`. This ensures the warning glow envelops the entire progress bar rather than being clipped behind an already-near-full fill element — solving a visual bug where at >80% utilization the glow was nearly invisible because the colored fill occupied most of the container. This pattern now matches `GPUDetails.jsx`.
 
 **Accessibility:** Uses `role="progressbar"` with `aria-valuenow`, `aria-valuemin="0"`, `aria-valuemax="100"`.
 
@@ -304,3 +306,8 @@ Root container for PC cards. Renders a responsive CSS Grid (1 col mobile, 2 col 
 - **Added** "Check Services" icon button to the action-buttons bar (positioned after "Delete PC"). Button features: 16×16 refresh SVG icon, outlined styling with `border-text-secondary` and `text-text-secondary`, compact `p-2` padding. When `healthLoading` is truthy, the button is disabled (`disabled={healthLoading}`) and the icon spins via Tailwind's `animate-spin` class (dynamically toggled in the SVG element's className). Includes both `aria-label` (`Check services on {pc.nombre}`) and native `title="Check Services"` for accessibility.
 - **Added** health status computation inside `services.map()`: `` `healthKey = ${pc?._id}---${i}` `` — a composite string key concatenating the PC's MongoDB `_id`, three dashes separator, and the 0-based service loop index. The code then looks up `healthStatuses[healthKey] ?? null` to retrieve the current per-service health state (`'up'`, `'down'`, or `null`).
 - **Added** `status={serviceStatus}` prop forwarding to each `<ServiceRow>` instance. This enables ServiceRow to render visual health indicators (dots, color coding, or status text) based on that specific service's probe result. The null-coalescing default (`?? null`) ensures an explicit "unknown" distinction from a confirmed `'down'` status.
+
+### GPUBar — Fixed `animate-gpu-warning` placement bug at >80% utilization
+- **Updated** `GPUBar.jsx`: the `animate-gpu-warning` CSS class was moved from the inner fill `<div>` (the colored progress bar) to the outer container `<div>` (the track/background). Previously, when GPU usage exceeded 80%, the filled bar occupied nearly the entire container, causing the warning pulse glow to be rendered *behind* the near-full fill element and become virtually invisible. By placing `animate-gpu-warning` on the parent container, the pulsing glow now envelops the entire progress bar from the outside, making it clearly visible at all utilization levels.
+- **Pattern alignment:** This placement now matches `GPUDetails.jsx`, which already applies `animate-gpu-warning` on the outer bar container. The two components share the same visual warning behavior but had diverged in implementation — this change brings them back into parity.
+- **No functional changes:** Props, computed values, color-tier logic, accessibility attributes, and animation mechanics remain identical. Only the CSS class binding location changed (line 9: outer `<div>` now conditionally includes `animate-gpu-warning`; line 10–17 fill `<div>` no longer references it).

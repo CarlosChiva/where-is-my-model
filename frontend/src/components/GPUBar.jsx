@@ -6,13 +6,13 @@ export default function GPUBar({ gpuGb, vramGb }) {
   const isWarning = percent > 80
 
   return (
-    <div className="relative w-full h-2.5 bg-bg-input rounded-full overflow-hidden">
+    <div className={`relative w-full h-2.5 bg-bg-input rounded-full overflow-hidden${isWarning ? ' animate-gpu-warning' : ''}`}>
       <div
         role="progressbar"
         aria-valuenow={Math.round(percent)}
         aria-valuemin="0"
         aria-valuemax="100"
-        className={`absolute inset-y-0 left-0 h-full ${colorClass} animate-gpu-fill${isWarning ? ' animate-gpu-warning' : ''}`}
+        className={`absolute inset-y-0 left-0 h-full ${colorClass} animate-gpu-fill`}
         style={{ '--gpu-target-width': `${percent}%`, width: '0%' }}
       />
     </div>
