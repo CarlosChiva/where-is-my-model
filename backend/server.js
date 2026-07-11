@@ -38,12 +38,24 @@ app.get('/api/health', (req, res) => {
 /* ------------------------------------------------------------------ */
 /*  Route registration (deferred until DB connects)                   */
 /*  Order matters to avoid Express parameter collision:                */
-/*    Health router first — /api/check-health/pcs/:pcId won't collide  */
-/*    Services router second — /api/pcs/:pcId/services before :id      */
+/*    Auth router first — /api/auth before any dynamic segments        */
+/*    Health router second — /api/check-health/pcs/:pcId won't collide */
+/*    Services router third — /api/pcs/:pcId/services before :id       */
 /*    PCs router last — /api/pcs catches the rest                      */
 /* ------------------------------------------------------------------ */
 
 async function registerRoutes() {
+  try {
+    const authModule = await import('./routes/auth.js');
+    app.use('/api/auth', authModule.default);
+    console.log('[server] ✓ Auth router registered at /api/auth');
+  } catch {
+    console.warn(
+      '[server] ⚠ Auth router not found — ' +
+      '/api/auth endpoints unavailable (create routes/auth.js)'
+    );
+  }
+
   try {
     const healthModule = await import('./routes/health.js');
     app.use('/api/check-health', healthModule.default);

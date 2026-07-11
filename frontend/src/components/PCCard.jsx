@@ -20,7 +20,7 @@ import GPUDetails from './GPUDetails';
 import { computeGpuUsage } from '../utils/gpuHelpers.js';
 
 export default function PCCard({
-  pc, index, onEditPc, onAddService, onDeletePc, onEditService, onDeleteService,
+  pc, index, isAdmin, onEditPc, onAddService, onDeletePc, onEditService, onDeleteService,
   healthStatuses = {}, healthLoading = false, onCheckPc
 }) {
   const services = pc?.servicios ?? [];
@@ -67,7 +67,8 @@ export default function PCCard({
               gpuName={resolvedGpuName}
               pcId={pc?._id}
               index={i}
-              onEdit={(editPayload) => onEditService({ ...editPayload, service, gpus, services })}
+              isAdmin={isAdmin}
+              onEdit={isAdmin ? (editPayload) => onEditService({ ...editPayload, service, gpus, services }) : () => {}}
               onDelete={onDeleteService}
               status={serviceStatus}
             />
@@ -82,30 +83,36 @@ export default function PCCard({
 
       {/* ── Action buttons ── */}
       <div className="flex gap-2 p-4 pt-2 border-t border-border">
-        <button
-          type="button"
-          className="bg-accent text-bg-primary font-semibold px-3 py-2 rounded-md shadow-btn-primary hover:bg-accent-hover transition-colors flex-1"
-          aria-label={`Edit server ${pc?.nombre ?? ''}`}
-          onClick={() => onEditPc(pc)}
-        >
-          ✏ Edit PC
-        </button>
-        <button
-          type="button"
-          className="border border-accent text-accent px-3 py-2 rounded-md hover:bg-accent-dim transition-colors flex-1"
-          aria-label={`Add service to ${pc?.nombre ?? ''}`}
-          onClick={() => onAddService({ pcId: pc?._id, gpus: pc?.gpus ?? [], servicios: pc?.servicios ?? [] })}
-        >
-          ＋ Add Service
-        </button>
-        <button
-          type="button"
-          className="border border-danger text-danger px-3 py-2 rounded-md hover:bg-danger/10 transition-colors flex-1"
-          aria-label={`Delete server ${pc?.nombre ?? ''}`}
-          onClick={() => onDeletePc({ pcId: pc?._id, nombre: pc?.nombre })}
-        >
-          ✕ Delete PC
-        </button>
+        {isAdmin && (
+          <button
+            type="button"
+            className="bg-accent text-bg-primary font-semibold px-3 py-2 rounded-md shadow-btn-primary hover:bg-accent-hover transition-colors flex-1"
+            aria-label={`Edit server ${pc?.nombre ?? ''}`}
+            onClick={() => onEditPc(pc)}
+          >
+            ✏ Edit PC
+          </button>
+        )}
+        {isAdmin && (
+          <button
+            type="button"
+            className="border border-accent text-accent px-3 py-2 rounded-md hover:bg-accent-dim transition-colors flex-1"
+            aria-label={`Add service to ${pc?.nombre ?? ''}`}
+            onClick={() => onAddService({ pcId: pc?._id, gpus: pc?.gpus ?? [], servicios: pc?.servicios ?? [] })}
+          >
+            ＋ Add Service
+          </button>
+        )}
+        {isAdmin && (
+          <button
+            type="button"
+            className="border border-danger text-danger px-3 py-2 rounded-md hover:bg-danger/10 transition-colors flex-1"
+            aria-label={`Delete server ${pc?.nombre ?? ''}`}
+            onClick={() => onDeletePc({ pcId: pc?._id, nombre: pc?.nombre })}
+          >
+            ✕ Delete PC
+          </button>
+        )}
         <button
           type="button"
           className="border border-text-secondary text-text-secondary p-2 rounded-md hover:bg-bg-input transition-colors disabled:opacity-50"

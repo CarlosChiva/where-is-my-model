@@ -4,7 +4,7 @@
 > Last updated: 2026-06-07 (revision)
 > Type: Composite folder
 
-This folder is the primary UI assembly layer of the "Where Is My Model" React frontend. It contains all presentational and interactive components used across two distinct application areas: a **server/service dashboard** (Header, PCGrid, PCCard, ServiceRow, GPUBar, GPUDetails) and an independent **GPU VRAM calculator** workspace (GpuCalculator subfolder). Modal dialogs for CRUD operations live in the Modals subfolder. Direct files provide building-block components consumed by pages or other wrappers; subfolders encapsulate self-contained feature modules.
+This folder is the primary UI assembly layer of the "Where Is My Model" React frontend. It contains all presentational and interactive components used across three distinct application areas: a **server/service dashboard** (Header, PCGrid, PCCard, ServiceRow, GPUBar, GPUDetails), an independent **GPU VRAM calculator** workspace (GpuCalculator subfolder), and a standalone **authentication page** (LoginPage). Modal dialogs for CRUD operations live in the Modals subfolder. Direct files provide building-block components consumed by pages or other wrappers; subfolders encapsulate self-contained feature modules.
 
 ---
 
@@ -141,6 +141,35 @@ Responsive grid layout that renders a collection of `PCCard` instances for all c
 
 ---
 
+### 📄 LoginPage.jsx
+
+Full-page authentication component providing tab-based login and registration. Manages local form state (username, password, field errors, API errors) while delegating credential operations to the global `AuthContext` via `useAuth()`. Auto-redirects to `'/'` when user is already authenticated. Styled with dark-theme Tailwind classes consistent with the app's design system.
+
+#### Imports and dependencies
+
+| Module | Imported elements | Type |
+|--------|-------------------|------|
+| `react` | `useState`, `useEffect` | External |
+| `../context/AuthContext` | `useAuth` | Internal |
+
+#### Functions and internal logic
+
+- **`LoginPage() → JSX.Element`** *(default export)*
+  Renders a full-page centered card with login/register tabs. No external props — all state is internal or via AuthContext.
+
+  - `mode: 'login' | 'register'` (default `'login'`) — determines which auth action to invoke and which labels/buttons to display. Tab clicks reset all errors.
+  - `username`, `password` — controlled inputs for the credential fields.
+  - `fieldErrors: Object` — client-side validation errors keyed by field. Checked on submit (`validate()`).
+  - `apiError: String | null` — server error from `login()`/`register()`. Shown as a styled alert banner above submit button.
+
+  **`validate() → boolean`** — Synchronous check that both fields are non-empty. Sets field-level error messages; returns `true` if valid.
+
+  **`handleSubmit(e) → Promise<void>`** — Prevents default, clears API error, validates, then calls the appropriate action (`login` or `register`) from useAuth(). On error, displays the message in `apiError`. On success, AuthContext flips state, triggering the redirect useEffect.
+
+  **Redirect:** `useEffect(() => { if (isAuthenticated) window.location.href = '/' }, [isAuthenticated])` — hard navigational redirect upon successful authentication.
+
+---
+
 ### 📄 ServiceRow.jsx
 
 Presentational row component for a single running service within a PCCard's services list. Displays the service name, port badge, GPU assignment badge (when available), an inline occupancy bar via `GPUBar`, and pencil/X action buttons for edit and delete operations.
@@ -225,6 +254,12 @@ The parent App wraps the dashboard layout shown above. When an action callback f
 ---
 
 ## 🔄 Changes in this update
+
+### LoginPage.jsx — New authentication page component (2026-07-11)
+- **Added** `LoginPage.jsx` as a new direct-file document. Full-page login/register component with tab-switching UI, controlled form inputs, client-side validation, API error display, loading spinner, and auto-redirect on successful authentication. Delegates all credential operations to `AuthContext` via `useAuth()` hook (`login`, `register`, `isLoading`, `isAuthenticated`).
+- **Updated** folder description paragraph to reference the third application area: standalone authentication page.
+
+### 2026-06-07 revision — Header.jsx correction
 
 ### 2026-06-07 revision — Header.jsx correction
 - **Removed** stale `onSave` prop and "Export JSON" button documentation from `Header.jsx`. The current source code no longer contains an Export JSON feature, Blob download logic, or the associated `handleExport()` helper.

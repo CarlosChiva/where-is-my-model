@@ -4,7 +4,7 @@
 > Last updated: 2026-07-11
 > Type: Composite folder
 
-React UI components for the GPU Infrastructure Dashboard. Contains six presentational components (Header, GPUBar, GPUDetails, ServiceRow, PCCard, PCGrid) that follow a strict unidirectional data-flow pattern: they receive data and callbacks as props, perform no data fetching, and delegate all mutations back to the root `App.jsx`. Includes a `Modals/` subfolder with five modal-dialog components for data-entry, editing, and deletion confirmations.
+React UI components for the GPU Infrastructure Dashboard. Contains six presentational dashboard components (Header, GPUBar, GPUDetails, ServiceRow, PCCard, PCGrid) that follow a strict unidirectional data-flow pattern: they receive data and callbacks as props, perform no data fetching, and delegate all mutations back to the root `App.jsx`. Includes a `Modals/` subfolder with five modal-dialog components for data-entry, editing, and deletion confirmations. Also includes `LoginPage.jsx`, a standalone authentication page that provides tab-based login/register workflows integrated with the global `AuthContext`.
 
 ---
 
@@ -249,7 +249,86 @@ Root container for PC cards. Renders a responsive CSS Grid (1 col mobile, 2 col 
 
 ---
 
+## 📄 `LoginPage.jsx`
+
+Standalone full-page authentication component that provides tab-switching login and registration functionality. Manages its own local form state (username, password, field errors, API errors) while delegating all credential operations to the global `AuthContext` via the `useAuth()` hook. Automatically redirects authenticated users back to the dashboard root (`'/'`). Styled with the same dark-theme Tailwind utility classes as the rest of the application (`bg-bg-primary`, `bg-bg-card`, accent colors, `font-mono` inputs).
+
+### Imports and dependencies
+
+| Module | Imported elements | Type |
+|--------|-------------------|------|
+| `react` | `useState`, `useEffect` | External |
+| `../context/AuthContext` | `useAuth` | Internal |
+
+### Functions
+
+#### `LoginPage() → JSX.Element` _(default export)_
+
+Full-page centered authentication card with tab-based switching between "Iniciar sesión" (login) and "Registrarse" (register) modes. No external props — all state is internal or sourced from `AuthContext`.
+
+**Auth context consumption:**
+Destructures four keys from `useAuth()`:
+- `login(username, password) → Promise<{ data, error }>` — authentication action.
+- `register(username, password) → Promise<{ data, error }>` — account creation action.
+- `isLoading: boolean` — async operation in-flight indicator (used to disable the submit button and show a spinner).
+- `isAuthenticated: boolean` — derived from `Boolean(user)` inside AuthContext; drives the auto-redirect logic.
+
+**Internal state:**
+
+| Variable | Initial Value | Role |
+|----------|---------------|------|
+| `mode` | `'login'` | Tab mode selector: `'login'` \| `'register'`. Determines which auth action to call and which button labels to display. |
+| `username` | `''` | Controlled text input value for the username field. |
+| `password` | `''` | Controlled password input value. |
+| `fieldErrors` | `{}` | Client-side validation errors keyed by field name (`username`, `password`). Displayed inline below each respective input. |
+| `apiError` | `null` | Server-side error message from the auth API call. Rendered as a styled alert banner above the submit button when truthy. |
+
+**Internal functions:**
+
+- **`validate() → boolean`**
+  Client-side synchronous validation. Checks that `username.trim()` is non-empty and `password` is truthy. Sets `fieldErrors` with descriptive messages for any missing fields. Returns `true` if both fields pass, `false` otherwise.
+
+- **`handleSubmit(e: SyntheticEvent) → Promise<void>`**
+  Form submission handler (wrapped in `async`). Prevents default, clears `apiError`, runs `validate()`. If validation passes, selects the correct action (`mode === 'login' ? login : register`) and awaits it with trimmed credentials. If the result has an error, updates `apiError` for display. On success: the AuthContext flips `isLoading → false` and `isAuthenticated → true`, which triggers the redirect in the `useEffect` guard.
+
+**Redirect logic:**
+```js
+useEffect(() => {
+  if (isAuthenticated) {
+    window.location.href = '/';
+  }
+}, [isAuthenticated]);
+```
+Hard redirects using `window.location.href` (navigational replace, not React Router). Fires whenever `isAuthenticated` transitions to `true`, ensuring a clean post-auth navigation. Dependency array includes only `[isAuthenticated]` so it runs on initial mount and on any auth-state change.
+
+**Tab UI:**
+Two buttons rendered via `.map()` over `['login', 'register']`. Each tab:
+- Uses `role="tab"` with dynamic `aria-selected={mode === tab}`.
+- Active tab receives accent-fill styling (`bg-accent text-bg-primary`).
+- Inactive tab uses input-bg styling (`bg-bg-input text-text-secondary hover:text-text-primary`).
+- Clicking any tab resets `apiError` and `fieldErrors` to clear stale error messages.
+
+**Form fields:**
+Each input has:
+- `aria-invalid` bound to the corresponding field error state.
+- Conditional border color: `border-danger focus:border-danger` on validation failure; `border-border focus:border-accent` in normal state.
+- Inline error `<p>` rendered below the input when a field has an error (styled with `text-sm text-danger`).
+- Appropriate `autoComplete` hints (`username`, `current-password` / `new-password`).
+
+**Submit button:**
+Full-width button that is disabled during `isLoading`. Displays an inline SVG spinner (`animate-spin`) and loading text ("Iniciando..." / "Registrando...") while an async operation is in flight. Shows the action label ("Iniciar sesión" / "Registrarse") when idle. Uses accent-filled styling with transition effects and proper disabled-state opacity (`disabled:opacity-50 disabled:cursor-not-allowed`).
+
+**API error alert:**
+Rendered conditionally as a `bg-danger/10` bordered card with `text-danger` message text, positioned between the password field and the submit button. Dismisses automatically when the user switches tabs or corrects form fields.
+
+---
+
 ## 🔄 Changes in this update
+
+### LoginPage.jsx — New authentication page component
+- **Added** full documentation for `LoginPage.jsx` as a new direct file in the components composite folder.
+- Documented all internal state variables, validation logic, form handling, tab-based UI, and AuthContext integration.
+- This component is self-contained (no props) and delegates credential operations to `AuthContext` via `useAuth()`. It provides client-side field validation, styled error banners, loading spinners, and automatic redirect on successful authentication.
 
 ### Initial creation (T13)
 - **Created** `docs/documentation/frontend/src/components.md` — composite folder documentation for `frontend/src/components/`.

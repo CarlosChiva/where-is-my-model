@@ -8,6 +8,11 @@ async function _request(url, options = {}) {
       headers.set('Content-Type', 'application/json');
     }
 
+    const token = localStorage.getItem('token');
+    if (token) {
+      headers.set('Authorization', `Bearer ${token}`);
+    }
+
     if (options.body && typeof options.body !== 'string') {
       options = { ...options, body: JSON.stringify(options.body) };
     }
