@@ -208,7 +208,7 @@ Browser (port 3000)
 
 6. **Data seeding and testing** — `seed.js` in the backend reads a flat `data.json` from the repository root, transforms it into Mongoose-compatible documents, and populates the `pcs` collection. Two integration tests (`test-gpu-cap.js` and `target: test-gpu-cap.sh`) exercise the VRAM capacity enforcement end-to-end with auto-cleanup.
 
-7. **Authentication layer** — The backend is instrumented for JWT-based session authentication. A new `User` Mongoose model (`models/User.js`) stores accounts in a separate `users` MongoDB collection, with passwords hashed via `bcryptjs` (10 salt rounds) in a pre-save hook and verified via an instance method `comparePassword()`. Two new production dependencies (`bcryptjs`, `jsonwebtoken`) are installed. JWT signing key (`JWT_SECRET`) and token lifetime (`JWT_EXPIRES_IN=1d`) are configured in `.env.development`. The auth middleware (`middleware/auth.js`) and auth routes (`routes/auth.js` with `/api/auth/register`, `/api/auth/login`, `/api/auth/me`) are the next items in development, once implemented they will sit between the existing CORS/body-parser middleware and the PC/service route handlers.
+7. **Authentication layer** — The backend is instrumented for JWT-based session authentication. A new `User` Mongoose model (`models/User.js`) stores accounts in a separate `users` MongoDB collection, with passwords hashed via `bcryptjs` (10 salt rounds) in a pre-save hook and verified via an instance method `comparePassword()`. Two new production dependencies (`bcryptjs`, `jsonwebtoken`) are installed. JWT signing key (`JWT_SECRET`) and token lifetime (`JWT_EXPIRES_IN=1d`) are configured in `.env.development`. The auth middleware (`middleware/auth.js`) and auth routes (`routes/auth.js` with `/api/auth/register`, `/api/auth/login`, `/api/auth/me`) sit between CORS/body-parser middleware and the PC/service route handlers. Registration uses a pending-approval flow: the first user gets `'admin'` + JWT immediately; all subsequent registrations receive `'pending'` role and a Spanish-language confirmation message (no JWT). An admin must explicitly approve each pending user via `PUT /api/users/:userId/role` before they can log in.
 
 ---
 
@@ -242,3 +242,9 @@ Browser (port 3000)
 - **T001 — Auth dependencies installed:** Added `bcryptjs@^3.0.3` and `jsonwebtoken@^9.0.3` to the technology stack summary table. Both packages are now production dependencies in `backend/package.json`.
 - **T002 — JWT environment variables:** Documented new env vars `JWT_SECRET` and `JWT_EXPIRES_IN=1d` as configuration backing the authentication layer.
 - **T003 — Authentication system overview:** Added the "users" MongoDB collection to the architecture diagram (with schema fields), added User.js model reference with auth routes and middleware notes in the backend section of the diagram, added paragraph #7 ("Authentication layer") to "How the pieces fit together", and added a quick-reference row pointing to Backend.md's authentication infrastructure section.
+
+---
+
+## 🔄 Changes in this update
+
+- **T2 — Pending registration flow:** Paragraph #7 under "How the pieces fit together" updated to describe the pending-approval pattern: first user gets admin + JWT, subsequent users get `pending` role and a Spanish confirmation message (no token), requiring explicit admin approval before they can log in.

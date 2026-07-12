@@ -64,12 +64,18 @@ function AuthProvider({ children }) {
     const result = await apiRegister(username, password);
     if (result.error) return result;
 
-    const { token: newToken, user: newUser } = result.data;
-    localStorage.setItem('token', newToken);
-    setUser(newUser);
-    setToken(newToken);
-    setIsLoading(false);
-    return result;
+    /* First registration returns a token and logs the user in immediately.*/
+    if (result.data?.token) {
+      const newToken = result.data.token;
+      localStorage.setItem('token', newToken);
+      setUser(result.data.user);
+      setToken(newToken);
+      setIsLoading(false);
+      return result;
+    }
+
+    /* Subsequent registrations create a 'pending' account — no token. */
+    return { ...result, pending: true };
   };
 
   const logout = () => {

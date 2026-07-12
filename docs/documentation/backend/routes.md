@@ -224,20 +224,21 @@ Express router for JWT-based user authentication. Default-exports an Express `Ro
 
 #### `POST /register` — Create a new user account
 
-Accepts `username` and `password` from the request body. Validates both fields are non-empty strings. Checks for duplicate usernames via `User.findOne()`. The first registered user automatically receives the `'admin'` role; all subsequent registrations receive `'user'`. Upon success, persists the new user (which triggers bcryptjs hashing in the pre-save hook), signs a JWT, and returns both token and profile.
+Accepts `username` and `password` from the request body. Validates both fields are non-empty strings. Checks for duplicate usernames via `User.findOne()`. Uses `User.countDocuments()` to determine the role: the first registered user receives `'admin'`; all subsequent registrations receive `'pending'`. Upon success, persists the new user (which triggers bcryptjs hashing in the pre-save hook). **Response differs by role:** admins receive a JWT token and profile; pending users receive a Spanish-language confirmation message and their role value — no JWT is issued until an admin approves them via `PUT /api/users/:userId/role`.
 
 - **Handler:** `async (req, res) => { ... }`
 - **Request body:**
   - `username`: Account name (`string`, required). Trimmed before persistence.
   - `password`: Plain-text password (`string`, required). Hashed by the User model's pre-save hook.
-- **Success response (201):** `{ success: true, token: <JWT string>, user: { userId, username, role } }`
+- **Success response — admin (first user, 201):** `{ success: true, token: <JWT string>, user: { userId, username, role } }`
+- **Success response — pending (subsequent users, 201):** `{ success: true, message: 'Cuenta registrada exitosamente. Espera aprobación del administrador.', role: 'pending' }` — no token is returned; the user must wait for an admin to change their role before they can log in and receive a JWT.
 - **Validation error (400):** `{ success: false, message: 'Username is required.' }` or `{ success: false, message: 'Password is required.' }` — missing/invalid input. Also `{ success: false, errors: [string, ...] }` from Mongoose `ValidationError`.
 - **Conflict (409):** `{ success: false, message: 'Username already exists.' }` — username collision.
 - **Error response (500):** `{ success: false, message: 'Internal server error' }`
 
 #### `POST /login` — Authenticate and receive a JWT
 
-Looks up a user by trimmed username with `.select('+password')` to include the normally-excluded password field. If the user exists, calls the instance method `user.comparePassword(password)` to verify the bcrypt hash. On mismatch or missing user, returns 401. On success, signs a JWT and returns token + profile.
+Looks up a user by trimmed username with `.select('+password')` to include the normally-excluded password field. If the user exists, calls the instance method `user.comparePassword(password)` to verify the bcrypt hash. On mismatch or missing user, returns 401. **After password verification, before JWT signing**, an additional guard checks if `user.role === 'pending'`: pending users are rejected with HTTP 403 and a Spanish-language message even though their credentials were correct — they must wait for an admin to approve them via `PUT /api/users/:userId/role`. On success (non-pending, correct credentials), signs a JWT and returns token + profile.
 
 - **Handler:** `async (req, res) => { ... }`
 - **Request body:**
@@ -246,6 +247,7 @@ Looks up a user by trimmed username with `.select('+password')` to include the n
 - **Success response (200):** `{ success: true, token: <JWT string>, user: { userId, username, role } }`
 - **Validation error (400):** `{ success: false, message: 'Username is required.' }` or `{ success: false, message: 'Password is required.' }` — missing/invalid input.
 - **Unauthorized (401):** `{ success: false, message: 'Invalid credentials.' }` — wrong username or password.
+- **Forbidden (403):** `{ success: false, message: 'Tu cuenta está pendiente de aprobación por un administrador.' }` — credentials are correct but the user's role is `'pending'`; no JWT is issued until an admin changes their role via `PUT /api/users/:userId/role`.
 - **Error response (500):** `{ success: false, message: 'Internal server error' }`
 
 #### `GET /me` — Return the authenticated user's profile
@@ -317,7 +319,7 @@ Fetches every PC document via `PC.find()` and delegates to `checkAllServices()` 
 
 ## 📄 `users.js`
 
-Express router for user administration operations. Default-exports an Express `Router` with two endpoints: listing all registered users and changing a user's role. Both endpoints are protected by `authMiddleware` (JWT verification) and `requireAdmin` (role-based access control), meaning only authenticated admin users can invoke them. Returns safe projections — the hashed password field is excluded both by Mongoose schema (`select: false`) and by explicit projection logic in the handlers.
+Express router for user administration operations. Default-exports an Express `Router` with three endpoints: listing all registered users, changing a user's role, and deleting a user. All endpoints are protected by `authMiddleware` (JWT verification) and `requireAdmin` (role-based access control), meaning only authenticated admin users can invoke them. Returns safe projections — the hashed password field is excluded both by Mongoose schema (`select: false`) and by explicit projection logic in the handlers. The `DELETE /:userId` endpoint includes a last-admin safeguard that automatically promotes another eligible user to admin before deletion to prevent the loss of all administrator accounts.
 
 ### Imports and dependencies
 
@@ -345,7 +347,7 @@ Returns every user document from the `users` collection as a lean array. Project
 
 #### `PUT /:userId/role` — Change a user's role (admin only)
 
-Updates the `role` field of an existing user to either `'admin'` or `'user'`. Performs a preemptive `mongoose.Types.ObjectId.isValid()` check on `req.params.userId` before any database access. Validates that `req.body.role` is one of the two allowed values. Uses `User.findByIdAndUpdate()` with `{ new: true, runValidators: true }` to return the fresh document and trigger schema validators. Catches Mongoose `CastError` for malformed ObjectIds that bypass the pre-check. Returns the updated user document (password excluded by schema's `select: false`).
+Updates the `role` field of an existing user to one of three allowed values: `'admin'`, `'user'`, or `'pending'`. Performs a preemptive `mongoose.Types.ObjectId.isValid()` check on `req.params.userId` before any database access. Validates that `req.body.role` is one of the three allowed values. Uses `User.findByIdAndUpdate()` with `{ new: true, runValidators: true }` to return the fresh document and trigger schema validators. Catches Mongoose `CastError` for malformed ObjectIds that bypass the pre-check. Returns the updated user document (password excluded by schema's `select: false`).
 
 - **Middleware chain (in order):**
   1. `authMiddleware` — verifies Bearer JWT; returns 401 on authentication failure.
@@ -354,20 +356,43 @@ Updates the `role` field of an existing user to either `'admin'` or `'user'`. Pe
 - **Parameters:**
   - `params.userId`: MongoDB ObjectId string of the target user.
 - **Request body:**
-  - `role`: New role value (`string`, must be `'admin'` or `'user'`).
+  - `role`: New role value (`string`, must be `'admin'`, `'user'`, or `'pending'`).
 - **Success response (200):** `{ success: true, data: { <updated User document with password excluded> } }`
 - **Bad request (400):** `{ success: false, message: 'Invalid user ID format.' }` — either from the pre-check (`isValid()`) or from a Mongoose `CastError` in the catch block.
-- **Bad request (400):** `{ success: false, message: 'Role must be either "admin" or "user".' }` — role value not one of the two allowed strings.
+- **Bad request (400):** `{ success: false, message: 'Role must be either "admin", "user" or "pending".' }` — role value not one of the three allowed strings.
 - **Not found (404):** `{ success: false, message: 'User not found.' }` — no user document matches the given `_id`.
 - **Unauthorized (401):** Various messages depending on auth failure type — handled by upstream `authMiddleware`.
 - **Forbidden (403):** `{ success: false, message: 'Admin access required.' }` — returned by `requireAdmin` when the authenticated user's role is not `'admin'`.
 - **Error response (500):** `{ success: false, message: 'Internal server error' }` — logged via `console.error('[users] PUT /:userId/role error:', err)`.
 
+#### `DELETE /:userId` — Delete a user (admin only) with last-admin safeguard
+
+Deletes a user document by `_id`. Performs a preemptive `mongoose.Types.ObjectId.isValid()` check on `req.params.userId` before any database access. Looks up the target user to confirm existence (404 if not found). **Last-admin safeguard:** Before deletion, counts existing admins via `User.countDocuments({ role: 'admin' })`. If only one admin exists (i.e., the targeted user), searches for a non-pending candidate (`role !== 'pending'`, `_id` different from target) to automatically promote to `'admin'` before proceeding. If no eligible candidate exists, returns 400 with an error message — the deletion is aborted. On success, deletes the user via `User.findByIdAndDelete()` and returns 204 No Content. Catches Mongoose `CastError` for malformed ObjectIds that bypass the pre-check.
+
+- **Middleware chain (in order):**
+  1. `authMiddleware` — verifies Bearer JWT; returns 401 on authentication failure.
+  2. `requireAdmin` — enforces `role === 'admin'`; returns 403 for non-admin users.
+- **Handler:** `async (req, res) => { ... }`
+- **Parameters:**
+  - `params.userId`: MongoDB ObjectId string of the target user.
+- **Last-admin safeguard logic:**
+  - Counts admins: `User.countDocuments({ role: 'admin' })`.
+  - If count equals 1 (only admin is the deletion target): searches for a replacement candidate via `User.findOne({ role: { $ne: 'pending' }, _id: { $ne: targetId } })`.
+  - If a candidate is found: sets `candidate.role = 'admin'` and persists via `candidate.save()`, then proceeds with deletion.
+  - If no candidate exists: aborts deletion with HTTP 400 and an explanatory message.
+- **Success response (204):** No content body — empty response indicating successful deletion.
+- **Bad request (400):** `{ success: false, message: 'Invalid user ID format.' }` — either from the pre-check (`isValid()`) or from a Mongoose `CastError` in the catch block.
+- **Bad request (400):** `{ success: false, message: 'Cannot delete the last admin and no other user is available to promote.' }` — last-admin safeguard triggered and no eligible promotion candidate found.
+- **Not found (404):** `{ success: false, message: 'User not found.' }` — no user document matches the given `_id`.
+- **Unauthorized (401):** Various messages depending on auth failure type — handled by upstream `authMiddleware`.
+- **Forbidden (403):** `{ success: false, message: 'Admin access required.' }` — returned by `requireAdmin` when the authenticated user's role is not `'admin'`.
+- **Error response (500):** `{ success: false, message: 'Internal server error' }` — logged via `console.error('[users] DELETE /:userId error:', err)`.
+
 ### Exports
 
 | Export | Type | Description |
 |--------|------|-------------|
-| `default` | `express.Router()` | Router instance with 2 admin-only user management endpoints mounted at `/api/users` via `server.js` |
+| `default` | `express.Router()` | Router instance with 3 admin-only user management endpoints mounted at `/api/users` via `server.js` |
 
 ---
 
@@ -400,7 +425,7 @@ Updates the `role` field of an existing user to either `'admin'` or `'user'`. Pe
 
 ## 🔄 Changes in this update
 
-- **T005 — Auth routes (`auth.js`) added:** New Express router providing three authentication endpoints mounted at `/api/auth`. `POST /register` creates a new user account (first user gets `'admin'` role, subsequent users get `'user'` role), signs a JWT, and returns token + profile. `POST /login` authenticates via username/password comparison (bcryptjs), signs a JWT on success, and returns token + profile. `GET /me` is protected by `authMiddleware` and returns the decoded JWT payload as the user profile without an additional database query. Full per-endpoint documentation including imports, helper functions (`signToken`, `userProfile`), request/response shapes, and error handling has been added.
+- **T005 — Auth routes (`auth.js`) added:** New Express router providing three authentication endpoints mounted at `/api/auth`. `POST /register` creates a new user account (first user gets `'admin'` role, subsequent users get `'pending'` role), signs a JWT for the first user only — pending users receive a Spanish-language success message instead of a token. `POST /login` authenticates via username/password comparison (bcryptjs), signs a JWT on success, and returns token + profile. `GET /me` is protected by `authMiddleware` and returns the decoded JWT payload as the user profile without an additional database query. Full per-endpoint documentation including imports, helper functions (`signToken`, `userProfile`), request/response shapes, and error handling has been added.
 
 ## 🔄 Changes in this update
 
@@ -409,3 +434,15 @@ Updates the `role` field of an existing user to either `'admin'` or `'user'`. Pe
 ## 🔄 Changes in this update
 
 - **2026-07-12 — T2: Added `PUT /:userId/role` endpoint to `users.js`:** New admin-only endpoint for changing a user's role to `'admin'` or `'user'`. Performs preemptive `mongoose.Types.ObjectId.isValid()` validation on the URL parameter, validates that the request body `role` field is one of two allowed values, then updates via `User.findByIdAndUpdate()` with `{ new: true, runValidators: true }`. Catches Mongoose `CastError` for malformed ObjectIds. Updated the `users.js` file description, imports table (added `mongoose`), full per-endpoint documentation, and exports table to reflect both endpoints.
+
+## 🔄 Changes in this update
+
+- **T3 — Pending-user rejection guard in `POST /login`:** After password verification, before JWT signing, a new guard checks if `user.role === 'pending'`. Pending users are now rejected with HTTP 403 and the Spanish message `"Tu cuenta está pendiente de aprobación por un administrador."` even when credentials are correct. Updated the `POST /login` description to describe this new step in the authentication flow and added a **Forbidden (403)** response entry cross-referencing `PUT /api/users/:userId/role` as the admin approval mechanism.
+
+## 🔄 Changes in this update
+
+- **T2 — Pending registration flow in `auth.js`:** The `POST /register` endpoint now assigns `'pending'` (instead of `'user'`) to all non-first users via `User.countDocuments()`. When the assigned role is `'pending'`, the handler skips JWT issuance and returns a Spanish-language confirmation message (`'Cuenta registrada exitosamente. Espera aprobación del administrador.'`) along with `role: 'pending'`. The first user still receives `'admin'` + JWT as before (unchanged). Updated the per-endpoint description, split success response into two distinct shapes (admin vs. pending), corrected all references to `'user'` in prior changelog entries, and added a note cross-referencing `PUT /api/users/:userId/role` as the admin approval mechanism.
+
+## 🔄 Changes in this update
+
+- **T5 — Added `DELETE /:userId` endpoint to `users.js`:** New admin-only endpoint that deletes a user with full last-admin safeguard logic: (1) preemptive ObjectId format validation (400 on invalid), (2) target user lookup (404 if not found), (3) last-admin safeguard — counts current admins, and if only 1 exists, searches for a non-pending candidate (`role !== 'pending'`, different `_id`) to promote to admin before deletion; aborts with 400 if no eligible candidate is found, (4) deletes via `User.findByIdAndDelete()` returning 204 No Content on success. Protected by both `authMiddleware` and `requireAdmin`. Updated the file description to mention three endpoints, added full per-endpoint documentation including safeguard flow details, updated the exports table count from 2 to 3.

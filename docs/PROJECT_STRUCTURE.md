@@ -13,7 +13,7 @@ where-is-my-model/
 │   │   └── validation.js           # validatePcBody, validateServiceBody, validateServiceUpdate
 │   ├── models/
 │   │   ├── PC.js                  # Schema: {nombre, ip, vram, servicios[]}, virtual totalGpu, GPU cap validator
-│   │   └── User.js                # [AUTH] Schema: {username (unique), password (bcrypt), role ('admin'|'user')}
+│   │   └── User.js                # [AUTH] Schema: {username (unique), password (bcrypt), role ('admin'|'user'|'pending')}
 │   ├── routes/
     │   │   ├── auth.js            # [AUTH] POST /register, POST /login, GET /me, GET /users, PUT /users/:userId/role
     │   │   ├── pcs.js             # GET /, GET /:id, POST /, PUT /:id, DELETE /:id (+ auth middleware)

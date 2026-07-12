@@ -1,10 +1,10 @@
 # `hooks`
 
 > Path: `frontend/src/hooks/`
-> Last updated: 2026-07-12
+> Last updated: 2026-07-12 (T7 — useDeleteUser)
 > Type: Leaf folder
 
-Custom React hooks for the GPU Infrastructure Dashboard frontend. Provides data-fetching hooks for loading the master list of GPU servers (`usePcs`), per-server services (`useServices`), and the application user list (`useUsers`), seven mutation hooks for CRUD operations on PCs, services, and user roles (create, update, delete), and a health-monitoring hook for per-service TCP status (`useServiceHealth`). Most CRUD hooks follow a consistent pattern: they manage `loading` and `error` state, expose an `onSuccess` callback for side effects, and return a simple object with reactive state and a mutation function. The two list-fetching hooks (`usePcs`, `useUsers`) share an identical monotonic fetch-counter staleness guard to prevent race conditions on rapid refetches.
+Custom React hooks for the GPU Infrastructure Dashboard frontend. Provides data-fetching hooks for loading the master list of GPU servers (`usePcs`), per-server services (`useServices`), and the application user list (`useUsers`), eight mutation hooks for CRUD operations on PCs, services, and users (create, update, delete, role management), and a health-monitoring hook for per-service TCP status (`useServiceHealth`). Most CRUD hooks follow a consistent pattern: they manage `loading` and `error` state, expose an `onSuccess` callback for side effects, and return a simple object with reactive state and a mutation function. The two list-fetching hooks (`usePcs`, `useUsers`) share an identical monotonic fetch-counter staleness guard to prevent race conditions on rapid refetches.
 
 ---
 
@@ -341,6 +341,34 @@ Mutation hook for changing an application user's role. Calls the `updateUserRole
 
 ---
 
+## 📄 `useDeleteUser.js`
+
+Mutation hook for deleting a user account. Follows the same pattern as `useDeletePc` and `useDeleteService`: manages `loading` and `error` state via `useState`, uses a try/catch/finally block for robust error handling, guards the `onSuccess` callback invocation, and returns `{ data: null, error }` on failure. Exposes `clearError` (added in T10) to allow parent components (AdminPanel) to dismiss stale API errors — e.g., after closing a delete confirmation dialog.
+
+### Imports and dependencies
+
+| Module | Imported elements | Type |
+|--------|-------------------|------|
+| `react` | `useState` | External |
+| `../services/userApi.js` | `deleteUser` | Internal |
+
+### Functions
+
+- **`useDeleteUser({ onSuccess }: { onSuccess: Function }) → { loading: boolean, error: string \| null, mutate: Function, clearError: Function }`**
+  Custom mutation hook for user deletion. Initializes `loading` to `false`, `error` to `null`.
+  - `onSuccess`: Optional callback invoked after a successful delete operation.
+  - **Returns:** An object with `loading`, `error`, `mutate`, and `clearError`.
+
+  **Internal functions:**
+
+  - **`mutate(userId: string) → Promise<Object>`**
+    Deletes a user account by MongoDB `_id`. Sets `loading=true`, clears error, calls `deleteUser(userId)`, handles result errors (`result.error`) and caught exceptions (`err instanceof Error ? err.message : String(err)`), invokes `onSuccess` on success (guarded by `if (result && !result.error && onSuccess)`), and returns the result or `{ data: null, error }` on failure. Resets `loading=false` in the `finally` block regardless of outcome.
+
+  - **`clearError() → void`**
+    Resets the `error` state to `null`. Used by parent components (e.g., AdminPanel) to dismiss stale API error messages — called when closing the delete confirmation dialog so old errors don't persist visually.
+
+---
+
 ## 🔄 Changes in this update
 
 - **Created** `hooks.md` as a new leaf folder document for `frontend/src/hooks/`. Documents all 8 React hooks: `usePcs` and `useServices` (data fetching), plus `useCreatePc`, `useCreateService`, `useDeletePc`, `useDeleteService`, `useUpdatePc`, `useUpdateService` (CRUD mutations).
@@ -370,6 +398,15 @@ Mutation hook for changing an application user's role. Calls the `updateUserRole
 - **Updated** return type signature to `{ loading: boolean, error: string | null, mutate: Function, clearError: Function }`.
 - **Updated** `mutate()` description: now includes `setLoading(true)`, `setError(null)`, error handling details matching actual implementation.
 - **Updated** function description: now mentions `clearError` export for dismissing stale API errors, consistent with `useCreatePc`, `useCreateService`, and `useUpdatePc`.
+
+### T7 — useDeleteUser.js addition (2026-07-12)
+- **Added** full documentation for the new file `useDeleteUser.js`:
+  - Imports (`useState` from `react`; `deleteUser` from `../services/userApi.js`).
+  - Single exported default function: `useDeleteUser({ onSuccess })` returning `{ loading, error, mutate }`.
+  - Follows the standard mutation hook pattern matching `useDeletePc` and `useDeleteService`: `useState` for `loading`/`error`, try/catch/finally for async handling, guard-claw on `onSuccess`, returns `{ data: null, error }` fallback on failure.
+  - `mutate(userId)` accepts a single user ID string — intended for Admin Panel user deletion workflows.
+  - Does **not** expose `clearError` (deletion errors self-clear on subsequent calls; consistent with `useDeletePc` and `useDeleteService` patterns).
+- **Updated** general description: now mentions eight mutation hooks (previously seven) to account for the new user deletion capability completing the user CRUD cycle.
 
 ### useUpdateUserRole.js addition (2026-07-12)
 - **Added** full documentation for the new file `useUpdateUserRole.js`:

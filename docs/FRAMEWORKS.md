@@ -42,16 +42,17 @@
 | `DELETE` | `/api/pcs/:pcId/services/:index` | Delete service | ✅ |
 | `POST` | `/api/check-health/pcs/:pcId` | Check all services health for a single PC (TCP) | 🔄 In progress |
 | `POST` | `/api/check-health/all` | Check all services health across all PCs (TCP) | 🔄 In progress |
-| `GET` | `/api/auth/users` | List all users (admin-only, no passwords) | 🔜 Planned |
-| `PUT` | `/api/auth/users/:userId/role` | Toggle user role admin↔user (admin-only) | 🔜 Planned |
+| `GET` | `/api/auth/users` | List all users (admin-only, no passwords) | ✅ Implemented |
+| `PUT` | `/api/auth/users/:userId/role` | Update user role (admin↔user↔pending, admin-only) | 🔄 In progress |
+| `DELETE` | `/api/auth/users/:userId` | Delete user with last-admin safeguard (admin-only) | 🔜 Planned |
 
 ## Auth Infrastructure
 
 ### JWT Structure
 ```js
-{ userId: String, username: String, role: 'admin'|'user' }
+{ userId: String, username: String, role: 'admin'|'user'|'pending' }
 ```
-Signed with `JWT_SECRET`. Stored in `localStorage['token']` on frontend.
+Signed with `JWT_SECRET`. Stored in `localStorage['token']` on frontend. Pending users never receive a JWT token.
 
 ### Middleware (`backend/middleware/auth.js`)
 - **`authMiddleware`**: Verifies Bearer token, sets `req.user = decoded_payload`

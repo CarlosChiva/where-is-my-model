@@ -1,9 +1,16 @@
+import { useState } from 'react';
 import useUsers from '../hooks/useUsers.js';
 import useUpdateUserRole from '../hooks/useUpdateUserRole.js';
+import useDeleteUser from '../hooks/useDeleteUser.js';
+import DeleteConfirmModal from './Modals/DeleteConfirmModal.jsx';
 
 export default function AdminPanel() {
   const { data: users, loading, error: fetchError, refetch } = useUsers();
   const { loading: updating, error: updateError, mutate, clearError } = useUpdateUserRole({ onSuccess: refetch });
+  const { loading: deleting, error: deleteError, mutate: deleteUser, clearError: clearDeleteError } = useDeleteUser({ onSuccess: refetch });
+
+  /* ── Confirm dialog target state ── */
+  const [deleteTarget, setDeleteTarget] = useState(null); // { userId, username } | null
 
   /* ── Guard: show spinner while initial data fetch resolves ── */
   if (loading) {
@@ -38,10 +45,23 @@ export default function AdminPanel() {
     );
   }
 
-  /* ── Toggle handler — flips 'admin' <-> 'user' ── */
-  const handleToggle = (userId, currentRole) => {
-    const nextRole = currentRole === 'admin' ? 'user' : 'admin';
-    mutate(userId, nextRole);
+  /* ── Role select handler — dispatches any of the three roles ── */
+  const handleRoleChange = (userId, newRole) => {
+    mutate(userId, newRole);
+  };
+
+  /* ── Delete confirm / cancel handlers ── */
+  const confirmDelete = async () => {
+    const result = await deleteUser(deleteTarget.userId);
+    if (!result?.error) {
+      setDeleteTarget(null); // auto-close on success
+    }
+    clearDeleteError();
+  };
+
+  const cancelDelete = () => {
+    setDeleteTarget(null);
+    clearDeleteError();
   };
 
   return (
@@ -76,7 +96,7 @@ export default function AdminPanel() {
               <tr className="border-b border-border">
                 <th className="text-left text-xs font-mono uppercase tracking-wide text-text-muted px-6 py-3">Username</th>
                 <th className="text-left text-xs font-mono uppercase tracking-wide text-text-muted px-6 py-3">Role</th>
-                <th className="text-left text-xs font-mono uppercase tracking-wide text-text-muted px-6 py-3">Action</th>
+                <th className="text-left text-xs font-mono uppercase tracking-wide text-text-muted px-6 py-3">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -85,31 +105,47 @@ export default function AdminPanel() {
                   {/* Username */}
                   <td className="px-6 py-4 text-text-primary font-mono">{user.username}</td>
 
-                  {/* Role badge — green pill for admin, muted pill for user */}
+                  {/* Role badge — green for admin, yellow for pending, muted for user */}
                   <td className="px-6 py-4">
                     <span className={`inline-block px-3 py-1 rounded-full text-xs font-medium ${
                       user.role === 'admin'
                         ? 'bg-gpu-green/20 text-gpu-green'
-                        : 'bg-bg-hover text-text-muted'
+                        : user.role === 'pending'
+                          ? 'bg-gpu-yellow/20 text-gpu-yellow'
+                          : 'bg-bg-hover text-text-muted'
                     }`}>
                       {user.role}
                     </span>
                   </td>
 
-                  {/* Toggle button */}
+                  {/* Role select + Delete button */}
                   <td className="px-6 py-4">
-                    <button
-                      type="button"
-                      onClick={() => handleToggle(user.userId, user.role)}
-                      disabled={updating}
-                      className={`text-sm font-medium px-3.5 py-2 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                        user.role === 'admin'
-                          ? 'bg-danger/10 text-danger hover:bg-danger/20 border border-danger/30'
-                          : 'bg-accent/10 text-accent hover:bg-accent/20 border border-accent/30'
-                      }`}
-                    >
-                      {user.role === 'admin' ? 'Revoke Admin' : 'Make Admin'}
-                    </button>
+                    <div className="flex items-center gap-3">
+                      <select
+                        value={user.role}
+                        onChange={(e) => handleRoleChange(user.userId, e.target.value)}
+                        disabled={updating || deleting}
+                        className={`text-sm rounded-md border transition-colors px-2.5 py-1.5 ${
+                          updating ? 'bg-bg-input text-text-muted border-border cursor-not-allowed'
+                          : 'bg-bg-input text-text-primary border-border focus:border-accent focus:outline-none'
+                        }`}
+                      >
+                        <option value="admin">Admin</option>
+                        <option value="user">User</option>
+                        <option value="pending">Pending</option>
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => setDeleteTarget({ userId: user.userId, username: user.username })}
+                        disabled={updating || deleting}
+                        className="p-1.5 text-text-muted hover:text-danger transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                        aria-label={`Delete ${user.username}`}
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.496 3.16c.342.052.682.107 1.022.166m-4.595 8.745v.005" />
+                        </svg>
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -117,6 +153,18 @@ export default function AdminPanel() {
           </table>
         )}
       </div>
+
+      {/* ── Delete confirmation dialog ─────────────────────────── */}
+      {deleteTarget && (
+        <DeleteConfirmModal
+          isOpen={deleteTarget !== null}
+          message={`Delete user "${deleteTarget.username}"? This action cannot be undone.`}
+          onConfirm={confirmDelete}
+          onCancel={cancelDelete}
+          loading={deleting}
+          error={deleteError}
+        />
+      )}
     </div>
   );
 }

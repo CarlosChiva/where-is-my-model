@@ -1,7 +1,7 @@
 # Components
 
 > Path: `frontend/src/components`
-> Last updated: 2026-06-07 (revision)
+> Last updated: 2026-07-12 (T8 revision)
 > Type: Composite folder
 
 This folder is the primary UI assembly layer of the "Where Is My Model" React frontend. It contains all presentational and interactive components used across three distinct application areas: a **server/service dashboard** (Header, PCGrid, PCCard, ServiceRow, GPUBar, GPUDetails), an independent **GPU VRAM calculator** workspace (GpuCalculator subfolder), and a standalone **authentication page** (LoginPage). Modal dialogs for CRUD operations live in the Modals subfolder. Direct files provide building-block components consumed by pages or other wrappers; subfolders encapsulate self-contained feature modules.
@@ -147,13 +147,13 @@ Responsive grid layout that renders a collection of `PCCard` instances for all c
 
 ### 📄 LoginPage.jsx
 
-Full-page authentication component providing tab-based login and registration. Manages local form state (username, password, field errors, API errors) while delegating credential operations to the global `AuthContext` via `useAuth()`. Auto-redirects to `'/'` when user is already authenticated. Styled with dark-theme Tailwind classes consistent with the app's design system.
+Full-page authentication component providing tab-based login and registration. Manages local form state (username, password, field errors, API errors, pending-approval flag) while delegating credential operations to the global `AuthContext` via `useAuth()`. Handles three post-submit outcomes: **(a)** successful auto-login redirects to dashboard; **(b)** pending-registration displays an approval-info banner; **(c)** any API error renders a danger alert. Styled with dark-theme Tailwind classes consistent with the app's design system.
 
 #### Imports and dependencies
 
 | Module | Imported elements | Type |
 |--------|-------------------|------|
-| `react` | `useState`, `useEffect` | External |
+| `react` | `useState` | External |
 | `../context/AuthContext` | `useAuth` | Internal |
 
 #### Functions and internal logic
@@ -161,16 +161,20 @@ Full-page authentication component providing tab-based login and registration. M
 - **`LoginPage() → JSX.Element`** *(default export)*
   Renders a full-page centered card with login/register tabs. No external props — all state is internal or via AuthContext.
 
-  - `mode: 'login' | 'register'` (default `'login'`) — determines which auth action to invoke and which labels/buttons to display. Tab clicks reset all errors.
+  - `mode: 'login' | 'register'` (default `'login'`) — determines which auth action to invoke and which labels/buttons to display. Tab clicks reset all errors **and** clear the pending flag (`setRegistrationPending(false)`).
   - `username`, `password` — controlled inputs for the credential fields.
   - `fieldErrors: Object` — client-side validation errors keyed by field. Checked on submit (`validate()`).
-  - `apiError: String | null` — server error from `login()`/`register()`. Shown as a styled alert banner above submit button.
+  - `apiError: String | null` — server error from `login()`/`register()`. Shown as a danger-styled alert banner above the submit button.
+  - `registrationPending: boolean` (default `false`) — set to `true` when `register()` returns `{ pending: true }` (pending-admin-approval scenario). Renders an accent-colored info banner with instructional text. Cleared on tab switch.
 
   **`validate() → boolean`** — Synchronous check that both fields are non-empty. Sets field-level error messages; returns `true` if valid.
 
-  **`handleSubmit(e) → Promise<void>`** — Prevents default, clears API error, validates, then calls the appropriate action (`login` or `register`) from useAuth(). On error, displays the message in `apiError`. On success, AuthContext flips state, triggering the redirect useEffect.
+  **`handleSubmit(e) → Promise<void>`** — Prevents default, clears API error and pending flag, validates, then calls the appropriate action (`login` or `register`) from useAuth(). Three mutually exclusive branches on response:
+    - **(1) `result.error` is truthy:** sets `apiError` → danger banner renders.
+    - **(2) `result.pending` is truthy:** sets `registrationPending = true` → accent-colored approval-info banner renders (no redirect occurs).
+    - **(3) Otherwise:** success — AuthContext flips state, triggering the authentication guard in `<App>` to swap `<LoginPage />` out for the dashboard.
 
-  **Redirect:** `useEffect(() => { if (isAuthenticated) window.location.href = '/' }, [isAuthenticated])` — hard navigational redirect upon successful authentication.
+  **Tab switching resets all transient state:** The tab handler executes `setMode(tab); setApiError(null); setFieldErrors({}); setRegistrationPending(false);`, ensuring that no leftover error or pending message bleeds across mode changes.
 
 ---
 
@@ -258,6 +262,12 @@ The parent App wraps the dashboard layout shown above. When an action callback f
 ---
 
 ## 🔄 Changes in this update
+
+### LoginPage.jsx — Pending-registration banner and state management (T8, 2026-07-12)
+- **Updated** `LoginPage.jsx` documentation to describe the new `registrationPending` boolean state and its rendering logic.
+- **Updated** `handleSubmit()` description with a three-way branching model: (1) error → `apiError`; (2) `result.pending` → accent-colored info banner; (3) success → redirect.
+- **Added** documentation that tab switching now resets `registrationPending` alongside all other transient state (`setApiError`, `setFieldErrors`).
+- **Corrected** imports: removed stale `useEffect` import reference — only `useState` is imported from React in the current source.
 
 ### LoginPage.jsx — New authentication page component (2026-07-11)
 - **Added** `LoginPage.jsx` as a new direct-file document. Full-page login/register component with tab-switching UI, controlled form inputs, client-side validation, API error display, loading spinner, and auto-redirect on successful authentication. Delegates all credential operations to `AuthContext` via `useAuth()` hook (`login`, `register`, `isLoading`, `isAuthenticated`).
