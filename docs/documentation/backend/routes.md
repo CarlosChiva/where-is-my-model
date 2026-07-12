@@ -315,6 +315,62 @@ Fetches every PC document via `PC.find()` and delegates to `checkAllServices()` 
 
 ---
 
+## 📄 `users.js`
+
+Express router for user administration operations. Default-exports an Express `Router` with two endpoints: listing all registered users and changing a user's role. Both endpoints are protected by `authMiddleware` (JWT verification) and `requireAdmin` (role-based access control), meaning only authenticated admin users can invoke them. Returns safe projections — the hashed password field is excluded both by Mongoose schema (`select: false`) and by explicit projection logic in the handlers.
+
+### Imports and dependencies
+
+| Module | Imported elements | Type |
+|--------|-------------------|------|
+| `express` | `express` (default) | External |
+| `mongoose` | `mongoose` (default) | External |
+| `../models/User.js` | `User` (default) | Internal |
+| `../middleware/auth.js` | `authMiddleware`, `requireAdmin` (named) | Internal |
+
+### Router endpoints
+
+#### `GET /` — List all users (admin only)
+
+Returns every user document from the `users` collection as a lean array. Projects only `userId` (stringified `_id`), `username`, and `role` — the password hash is never exposed. Protected by two middleware layers: authentication first, then role enforcement.
+
+- **Middleware chain (in order):**
+  1. `authMiddleware` — verifies Bearer JWT; returns 401 on authentication failure.
+  2. `requireAdmin` — enforces `role === 'admin'`; returns 403 for non-admin users.
+- **Handler:** `async (req, res) => { ... }`
+- **Success response (200):** `{ success: true, data: [{ userId, username, role }, ...] }` — array of projected user objects.
+- **Unauthorized (401):** Various messages depending on auth failure type — handled by upstream `authMiddleware`.
+- **Forbidden (403):** `{ success: false, message: 'Admin access required.' }` — returned by `requireAdmin` when the authenticated user's role is not `'admin'`.
+- **Error response (500):** `{ success: false, message: 'Internal server error' }` — logged via `console.error('[users] GET / error:', err)`.
+
+#### `PUT /:userId/role` — Change a user's role (admin only)
+
+Updates the `role` field of an existing user to either `'admin'` or `'user'`. Performs a preemptive `mongoose.Types.ObjectId.isValid()` check on `req.params.userId` before any database access. Validates that `req.body.role` is one of the two allowed values. Uses `User.findByIdAndUpdate()` with `{ new: true, runValidators: true }` to return the fresh document and trigger schema validators. Catches Mongoose `CastError` for malformed ObjectIds that bypass the pre-check. Returns the updated user document (password excluded by schema's `select: false`).
+
+- **Middleware chain (in order):**
+  1. `authMiddleware` — verifies Bearer JWT; returns 401 on authentication failure.
+  2. `requireAdmin` — enforces `role === 'admin'`; returns 403 for non-admin users.
+- **Handler:** `async (req, res) => { ... }`
+- **Parameters:**
+  - `params.userId`: MongoDB ObjectId string of the target user.
+- **Request body:**
+  - `role`: New role value (`string`, must be `'admin'` or `'user'`).
+- **Success response (200):** `{ success: true, data: { <updated User document with password excluded> } }`
+- **Bad request (400):** `{ success: false, message: 'Invalid user ID format.' }` — either from the pre-check (`isValid()`) or from a Mongoose `CastError` in the catch block.
+- **Bad request (400):** `{ success: false, message: 'Role must be either "admin" or "user".' }` — role value not one of the two allowed strings.
+- **Not found (404):** `{ success: false, message: 'User not found.' }` — no user document matches the given `_id`.
+- **Unauthorized (401):** Various messages depending on auth failure type — handled by upstream `authMiddleware`.
+- **Forbidden (403):** `{ success: false, message: 'Admin access required.' }` — returned by `requireAdmin` when the authenticated user's role is not `'admin'`.
+- **Error response (500):** `{ success: false, message: 'Internal server error' }` — logged via `console.error('[users] PUT /:userId/role error:', err)`.
+
+### Exports
+
+| Export | Type | Description |
+|--------|------|-------------|
+| `default` | `express.Router()` | Router instance with 2 admin-only user management endpoints mounted at `/api/users` via `server.js` |
+
+---
+
 ## 🔄 Changes in this update
 
 - **2026-06-03 — T005 Embedded Service CRUD Routes:** Added full documentation for `services.js`. This new file provides four REST endpoints (`GET /`, `POST /`, `PUT /:serviceIndex`, `DELETE /:serviceIndex`) for managing embedded service subdocuments within a PC. Services are addressed by array index (not ObjectId) and all mutations leverage Mongoose `.save()` to enforce the schema-level GPU-cap validator (`sum(gpu) ≤ vram`).
@@ -345,3 +401,11 @@ Fetches every PC document via `PC.find()` and delegates to `checkAllServices()` 
 ## 🔄 Changes in this update
 
 - **T005 — Auth routes (`auth.js`) added:** New Express router providing three authentication endpoints mounted at `/api/auth`. `POST /register` creates a new user account (first user gets `'admin'` role, subsequent users get `'user'` role), signs a JWT, and returns token + profile. `POST /login` authenticates via username/password comparison (bcryptjs), signs a JWT on success, and returns token + profile. `GET /me` is protected by `authMiddleware` and returns the decoded JWT payload as the user profile without an additional database query. Full per-endpoint documentation including imports, helper functions (`signToken`, `userProfile`), request/response shapes, and error handling has been added.
+
+## 🔄 Changes in this update
+
+- **2026-07-12 — Users router (`users.js`) added:** New Express router providing an admin-only user listing endpoint mounted at `/api/users`. `GET /` is protected by both `authMiddleware` and `requireAdmin`, returning a lean projection of `{ userId, username, role }` for all users (password hash excluded). Full per-endpoint documentation including middleware chain, response shapes, and error handling has been added.
+
+## 🔄 Changes in this update
+
+- **2026-07-12 — T2: Added `PUT /:userId/role` endpoint to `users.js`:** New admin-only endpoint for changing a user's role to `'admin'` or `'user'`. Performs preemptive `mongoose.Types.ObjectId.isValid()` validation on the URL parameter, validates that the request body `role` field is one of two allowed values, then updates via `User.findByIdAndUpdate()` with `{ new: true, runValidators: true }`. Catches Mongoose `CastError` for malformed ObjectIds. Updated the `users.js` file description, imports table (added `mongoose`), full per-endpoint documentation, and exports table to reflect both endpoints.
