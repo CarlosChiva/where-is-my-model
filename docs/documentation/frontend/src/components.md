@@ -226,9 +226,9 @@ Responsive grid layout container with three conditional rendering states: loadin
 
 ### Functions
 
-#### `PCGrid({ pcs, loading, onEditPc, onAddService, onDeletePc, onEditService, onDeleteService, serviceHealth }) → JSX.Element` _(default export)_
+#### `PCGrid({ pcs, loading, onEditPc, onAddService, onDeletePc, onEditService, onDeleteService, serviceHealth, isAdmin }) → JSX.Element` _(default export)_
 
-Root container for PC cards. Renders a responsive CSS Grid (1 col mobile, 2 col md+, 3 col lg+) with three mutually exclusive states. Now forwards health-check context from the parent hook down to each `PCCard`.
+Root container for PC cards. Renders a responsive CSS Grid (1 col mobile, 2 col md+, 3 col lg+) with three mutually exclusive states. Forwards health-check context from the parent hook down to each `PCCard`. Receives an `isAdmin` flag controlling whether admin-only CRUD action buttons are rendered within the card grid — non-admin users see cards without edit/delete/add-service controls entirely.
 
 - **`pcs: Array<PCObject>`** — Full server array.
 - **`loading: boolean`** — Data fetch in-flight flag.
@@ -255,14 +255,16 @@ Root container for PC cards. Renders a responsive CSS Grid (1 col mobile, 2 col 
 
 ## 📄 `LoginPage.jsx`
 
-Standalone full-page authentication component that provides tab-switching login and registration functionality. Manages its own local form state (username, password, field errors, API errors) while delegating all credential operations to the global `AuthContext` via the `useAuth()` hook. Automatically redirects authenticated users back to the dashboard root (`'/'`). Styled with the same dark-theme Tailwind utility classes as the rest of the application (`bg-bg-primary`, `bg-bg-card`, accent colors, `font-mono` inputs).
+Standalone full-page authentication component that provides tab-switching login and registration functionality. Manages its own local form state (username, password, field errors, API errors) while delegating all credential operations to the global `AuthContext` via the `useAuth()` hook. No hard reload — post-auth transition is automatic: when a successful login or registration flips `isAuthenticated` to `true` inside `AuthContext`, the `<App>` guard component re-renders and implicitly swaps `<LoginPage />` for the dashboard layout. Styled with the same dark-theme Tailwind utility classes as the rest of the application (`bg-bg-primary`, `bg-bg-card`, accent colors, `font-mono` inputs).
 
 ### Imports and dependencies
 
 | Module | Imported elements | Type |
 |--------|-------------------|------|
-| `react` | `useState`, `useEffect` | External |
+| `react` | `useState` | External |
 | `../context/AuthContext` | `useAuth` | Internal |
+
+> **Note:** `useEffect` is no longer imported. It was removed along with the hard-redirect logic. LoginPage is now purely a form component — navigation is handled by the parent `<App>` guard.
 
 ### Functions
 
@@ -271,11 +273,12 @@ Standalone full-page authentication component that provides tab-switching login 
 Full-page centered authentication card with tab-based switching between "Iniciar sesión" (login) and "Registrarse" (register) modes. No external props — all state is internal or sourced from `AuthContext`.
 
 **Auth context consumption:**
-Destructures four keys from `useAuth()`:
+Destructures three keys from `useAuth()`:
 - `login(username, password) → Promise<{ data, error }>` — authentication action.
 - `register(username, password) → Promise<{ data, error }>` — account creation action.
 - `isLoading: boolean` — async operation in-flight indicator (used to disable the submit button and show a spinner).
-- `isAuthenticated: boolean` — derived from `Boolean(user)` inside AuthContext; drives the auto-redirect logic.
+
+> **Removed:** `isAuthenticated` is no longer destructured from `useAuth()`. Previously it was consumed here to drive a `useEffect` hard redirect (`window.location.href = '/'`). That logic has been moved to `<App>` — when `AuthContext.user` is set, the App-level guard rerenders and swaps out `<LoginPage />` for the dashboard.
 
 **Internal state:**
 
@@ -293,17 +296,17 @@ Destructures four keys from `useAuth()`:
   Client-side synchronous validation. Checks that `username.trim()` is non-empty and `password` is truthy. Sets `fieldErrors` with descriptive messages for any missing fields. Returns `true` if both fields pass, `false` otherwise.
 
 - **`handleSubmit(e: SyntheticEvent) → Promise<void>`**
-  Form submission handler (wrapped in `async`). Prevents default, clears `apiError`, runs `validate()`. If validation passes, selects the correct action (`mode === 'login' ? login : register`) and awaits it with trimmed credentials. If the result has an error, updates `apiError` for display. On success: the AuthContext flips `isLoading → false` and `isAuthenticated → true`, which triggers the redirect in the `useEffect` guard.
+  Form submission handler (wrapped in `async`). Prevents default, clears `apiError`, runs `validate()`. If validation passes, selects the correct action (`mode === 'login' ? login : register`) and awaits it with trimmed credentials. If the result has an error, updates `apiError` for display. On success: `AuthContext` sets `isLoading → false` and populates `user`, which causes the `<App>` guard to swap out `<LoginPage />` — no redirect logic lives in this component anymore.
 
-**Redirect logic:**
-```js
-useEffect(() => {
-  if (isAuthenticated) {
-    window.location.href = '/';
-  }
-}, [isAuthenticated]);
+**Post-auth transition (no longer in LoginPage):**
+```jsx
+/*
+ * No redirect effect needed. App.jsx manages the authenticated guard: when a
+ * successful login flips isAuthenticated to true, the <App> guard rerenders
+ * and automatically transitions from <LoginPage /> back to the dashboard.
+ */
 ```
-Hard redirects using `window.location.href` (navigational replace, not React Router). Fires whenever `isAuthenticated` transitions to `true`, ensuring a clean post-auth navigation. Dependency array includes only `[isAuthenticated]` so it runs on initial mount and on any auth-state change.
+The previous implementation used `useEffect` with `window.location.href = '/'` to perform a hard navigational reload after authentication. This has been removed in favor of React's declarative rendering: `<App>` conditionally renders either `<LoginPage />` (when unauthenticated) or the full dashboard layout (when authenticated). The state transition is instantaneous and seamless — no page flicker, no browser address bar change, no loss of scroll position or component memoization cache.
 
 **Tab UI:**
 Two buttons rendered via `.map()` over `['login', 'register']`. Each tab:
@@ -387,6 +390,14 @@ Zero-arg arrow function wired to each row's toggle button. Computes the inverse 
 ---
 
 ## 🔄 Changes in this update
+
+### LoginPage.jsx — Removed hard reload and auth self-redirect logic
+- **Removed** the `useEffect` redirect block that used `window.location.href = '/'` when `isAuthenticated` became `true`. This hard navigational reload caused a full page refresh, losing all React component state, memoization caches, and scroll position.
+- **Removed** unused imports: `useEffect` from `react` and `isAuthenticated` from the `useAuth()` destructuring. LoginPage now imports only `useState` from `react` and consumes three keys from `AuthContext`: `login`, `register`, and `isLoading`.
+- **New transition model:** Post-auth navigation is entirely declarative. `handleSubmit` calls `login()` or `()` — both set the `user` state inside `AuthContext`. The parent `<App>` component monitors this state change via its own conditional rendering guard: when `isAuthenticated` flips to `true`, `<App>` rerenders and swaps `<LoginPage />` with the dashboard layout (containing `<Header>`, `<PCGrid>`, etc.). No redirect, no reload, no address bar flicker.
+- **Code comment preserved:** LoginPage.jsx includes an inline block comment explaining this design decision: *"No redirect effect needed. App.jsx manages the authenticated guard..."* — future maintainers will understand why there is no `useEffect` in this component.
+- **Impact smoother UX.** The login→dashboard transition is now instant, with zero browser repaint overhead. All hook subscriptions, data fetches, and component memoization remain live throughout the entire post-auth transition continues to function identically (same validation, same error handling, same button states). Only the redirect mechanism was replaced.
+- **Impact:** Smoother UX — no browser reload flash, no lost React.memo caches, no duplicate hook effects firing on a full page refresh.
 
 ### AdminPanel.jsx — Fix user ID references (`user._id` → `user.userId`)
 - **Updated** `AdminPanel.jsx` at two locations: (1) row key prop changed from `key={user._id}` to `key={user.userId}` (line 84); (2) toggle handler call changed from `handleToggle(user._id, user.role)` to `handleToggle(user.userId, user.role)` (line 103).

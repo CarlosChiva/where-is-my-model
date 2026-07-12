@@ -1,15 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 
 export default function LoginPage() {
-  const { login, register, isLoading, isAuthenticated } = useAuth();
+  const { login, register, isLoading } = useAuth();
 
-  /* ── Redirect already-authenticated users ──────────────────── */
-  useEffect(() => {
-    if (isAuthenticated) {
-      window.location.href = '/';
-    }
-  }, [isAuthenticated]);
+  /*
+   * No redirect effect needed. App.jsx manages the authenticated guard: when a
+   * successful login flips isAuthenticated to true, the <App> guard rerenders
+   * and automatically transitions from <LoginPage /> back to the dashboard.
+   */
 
   /* ── Local state ────────────────────────────────────────────── */
   const [mode, setMode] = useState('login'); // 'login' | 'register'

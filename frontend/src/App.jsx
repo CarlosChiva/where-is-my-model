@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 /* ── Auth Context ──────────────────────────────────────────── */
 import { useAuth }      from './context/AuthContext.jsx';
@@ -47,6 +47,14 @@ export default function App() {
 
   /* ── Health check hook — per-service TCP status manager ─── */
   const serviceHealth      = useServiceHealth();
+
+  /* Post-auth refetch trigger — fires when authentication resolves */
+  useEffect(() => {
+    if (isAuthenticated && !isLoading) {
+      refetch();
+      serviceHealth.checkAll();
+    }
+  }, [isAuthenticated, isLoading, refetch, serviceHealth.checkAll]);
 
   /*
    * State: Modal router — single object pattern.
