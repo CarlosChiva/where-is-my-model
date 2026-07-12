@@ -67,7 +67,7 @@ router.post('/register', async (req, res) => {
 
     /* --- First-user-is-admin logic ----------------------------------*/
     const userCount = await User.countDocuments();
-    const role = userCount === 0 ? 'admin' : 'user';
+    const role = userCount === 0 ? 'admin' : 'pending';
 
     /* --- Create user (pre-save hook hashes password) -----------------*/
     const newUser = new User({
@@ -77,7 +77,15 @@ router.post('/register', async (req, res) => {
     });
     await newUser.save();
 
-    /* --- Sign token and respond — 201 --------------------------------*/
+    /* --- Respond — 201 (JWT only for non-pending roles) ---------------*/
+    if (role === 'pending') {
+      return res.status(201).json({
+        success: true,
+        message: 'Cuenta registrada exitosamente. Espera aprobación del administrador.',
+        role: 'pending',
+      });
+    }
+
     const token = signToken(newUser);
     res.status(201).json({
       success: true,
@@ -124,6 +132,14 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({
         success: false,
         message: 'Invalid credentials.',
+      });
+    }
+
+    /* --- Block pending users ---------------------------------------- */
+    if (user.role === 'pending') {
+      return res.status(403).json({
+        success: false,
+        message: 'Tu cuenta está pendiente de aprobación por un administrador.',
       });
     }
 

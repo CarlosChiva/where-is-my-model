@@ -163,7 +163,7 @@ Thin API wrapper for admin-level user management operations (part of the Admin P
 
 | Module          | Imported elements       | Type      |
 |-----------------|-------------------------|-----------|
-| `./apiClient`   | `get`, `put`            | Internal  |
+| `./apiClient`   | `del`, `get`, `put`     | Internal  |
 
 ### Functions
 
@@ -176,6 +176,11 @@ Thin API wrapper for admin-level user management operations (part of the Admin P
   - `userId`: unique identifier of the user whose role is being changed.
   - `role`: the new role string value (e.g., `"user"`, `"admin"`).
   - **Returns:** `{ data, error }` with the updated user object or an error message.
+
+- **`deleteUser(userId: string | number) → Promise<{ data: any | null, error: string | null }>`** *(exported)*
+  Deletes a user by sending a DELETE request to `/users/:userId`. The `apiClient.del()` convenience method handles authentication header injection automatically.
+  - `userId`: unique identifier of the user to delete.
+  - **Returns:** `{ data, error }` (data is typically `null` for deletions; `error` if the request fails or the caller lacks admin privileges).
 
 ---
 
@@ -193,8 +198,8 @@ Thin API wrapper for admin-level user management operations (part of the Admin P
 ┌─────────┐ ┌──────────────┐  ┌──────────┐ ┌──────────────┐
 │ pcApi.js│ │serviceApi.js │  │authApi.js│ │userApi.js    │  ← domain-specific layers
 └─────────┘ └──────────────┘  └──────────┘ └──────────────┘
-    CRUD              CRUD          Auth       Admin (2 endpoints)
-                                    (3 ep)
+     CRUD              CRUD          Auth       Admin (3 endpoints)
+                                     (3 ep)
 ```
 
 - `apiClient.js` is the **foundation**: zero external imports, pure-fetch abstraction.
@@ -220,6 +225,7 @@ Thin API wrapper for admin-level user management operations (part of the Admin P
 | `/auth/me`                      | GET      | `getMe()`                          |
 | `/users`                        | GET      | `fetchUsers()`                     |
 | `/users/:userId/role`           | PUT      | `updateUserRole(userId, role)`     |
+| `/users/:userId`                | DELETE   | `deleteUser(userId)`               |
 
 ---
 
@@ -253,3 +259,12 @@ Thin API wrapper for admin-level user management operations (part of the Admin P
 - **Updated** general description: now mentions five domain-specific API wrappers (added `userApi` for admin-level user listing and role management).
 - **Updated** inter-file relationships diagram: added `userApi.js` node labeled "Admin (2 endpoints)".
 - **Updated** API surface summary table: added two rows for `/users` (GET) and `/users/:userId/role` (PUT).
+
+---
+
+### Changes from Task T6 — userApi.js deleteUser addition
+
+- **Updated** imports table for `userApi.js`: replaced `{ get, put }` with `{ del, get, put }` to reflect that `del` is now imported from `./apiClient`.
+- **Added** documentation for the new exported function `deleteUser(userId) → Promise<{ data: any | null, error: string | null }>`. Sends a DELETE request to `/users/:userId` via `apiClient.del()`. Returns `{ data, error }` (data is typically `null` for deletions).
+- **Updated** inter-file relationships diagram: changed `userApi.js` label from "Admin (2 endpoints)" to "Admin (3 endpoints)".
+- **Updated** API surface summary table: added one row for `/users/:userId` (DELETE) mapped to `deleteUser(userId)`.

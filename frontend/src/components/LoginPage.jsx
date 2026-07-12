@@ -16,6 +16,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [fieldErrors, setFieldErrors] = useState({});
   const [apiError, setApiError] = useState(null);
+  const [registrationPending, setRegistrationPending] = useState(false);
 
   /* ── Validation ─────────────────────────────────────────────── */
   const validate = () => {
@@ -38,6 +39,8 @@ export default function LoginPage() {
 
     if (result.error) {
       setApiError(result.error);
+    } else if (result.pending) {
+      setRegistrationPending(true);
     }
     /* On success: isLoading flips, isAuthenticated flips, redirect fires in useEffect */
   };
@@ -65,7 +68,7 @@ export default function LoginPage() {
               type="button"
               role="tab"
               aria-selected={mode === tab}
-              onClick={() => { setMode(tab); setApiError(null); setFieldErrors({}); }}
+              onClick={() => { setMode(tab); setApiError(null); setFieldErrors({}); setRegistrationPending(false); }}
               className={`flex-1 text-sm font-medium py-2 transition-colors ${
                 mode === tab
                   ? 'bg-accent text-bg-primary'
@@ -137,6 +140,15 @@ export default function LoginPage() {
           {apiError && (
             <div className="mb-4 p-3 bg-danger/10 border border-danger/30 rounded-md">
               <p className="text-sm text-danger">{apiError}</p>
+            </div>
+          )}
+
+          {/* Pending approval */}
+          {registrationPending && (
+            <div className="mb-4 p-3 bg-accent/10 border border-accent/30 rounded-md">
+              <p className="text-sm text-text-primary">
+                Registration successful. awaiting admin approval before you can log in.
+              </p>
             </div>
           )}
 
