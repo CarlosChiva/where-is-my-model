@@ -133,9 +133,11 @@ Browser (port 3000)
 │       ├── express.json() body parser        │
 │       ├── GET /api/health (inline)           │
 │       ├── Route registration:               │
-│       │     /api/check-health FIRST          │
-│       │     /api/pcs/:pcId/services SECOND   │
-│       │     /api/pcs THIRD                   │
+│       │     /api/auth FIRST                  │
+│       │     /api/users SECOND                │
+│       │     /api/check-health THIRD          │
+│       │     /api/pcs/:pcId/services FOURTH   │
+│       │     /api/pcs FIFTH                   │
 │       └── Global error handler              │
 │                                             │
 │  middleware/validation.js                   │
@@ -156,9 +158,13 @@ Browser (port 3000)
 │  routes/ (Express Routers)                  │
 │       → MongoDB CRUD via PC model            │
 │                                             │
-│  🔜 routes/auth.js (pending)                │
+│  ✅ routes/auth.js                          │
 │       → POST /register, /login              │
 │       → GET  /me (JWT-protected)            │
+│                                             │
+│  ✅ routes/users.js                          │
+│       → GET / (admin-only user list)        │
+│       → PUT /:userId/role (change role)     │
 │                                             │
 └──────────────┬──────────────────────────────┘
                │  Mongoose connection string:
@@ -194,7 +200,7 @@ Browser (port 3000)
 
 2. **Data persistence** — Every PC (compute server) is a single MongoDB document in the `pcs` collection. Services running on that server are embedded subdocuments within the parent PC record. No separate services collection exists. The Mongoose `PC` model defines per-GPU VRAM capacity validators that fire both at the schema level and during `.save()`.
 
-3. **API contract** — The backend exposes two REST resources: `POST/GET/PUT/DELETE /api/pcs` for server management, and nested `POST/GET/PUT/DELETE /api/pcs/:pcId/services` for service lifecycle. All responses use a standard envelope (`{ data?, error?, success }`). Validation middleware intercepts request bodies before they reach route handlers, collecting all field errors into a single aggregated response.
+3. **API contract** — The backend exposes five REST resources: `POST/GET/PUT/DELETE /api/pcs` for server management, nested `POST/GET/PUT/DELETE /api/pcs/:pcId/services` for service lifecycle, `POST /register` and `/login` plus `GET /me` at `/api/auth` for user authentication, `GET /api/users` for admin-only user listing, and TCP health probes at `/api/check-health`. All responses use a standard envelope (`{ data?, error?, success }`). Validation middleware intercepts request bodies before they reach route handlers, collecting all field errors into a single aggregated response.
 
 4. **Frontend orchestration** — The React SPA's `App.jsx` is the sole orchestrator: it owns all data-fetching hooks and mutation hooks, manages a modal-state router object to decide which dialog renders, and switches between dashboard and calculator views via a single `currentPage` state variable. Modals receive mutable callbacks; on success they trigger `refetch` through each hook's `onSuccess` callback, keeping the UI in sync with server state without manual refresh logic.
 

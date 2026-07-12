@@ -1,10 +1,10 @@
 # `services`
 
 > Path: `frontend/src/services`
-> Last updated: 2026-07-11
+> Last updated: 2026-07-12
 > Type: Leaf folder
 
-General purpose client-side service layer for the frontend application. This folder encapsulates all HTTP communication with the backend API, providing a lightweight fetch-based client (`apiClient`) and four domain-specific API wrappers: `pcApi` for PC management, `serviceApi` for service/lifecycle management, `healthApi` for health-check operations on PCs, and `authApi` for user authentication (register, login, profile retrieval). Together they form the data-access boundary of the frontend.
+General purpose client-side service layer for the frontend application. This folder encapsulates all HTTP communication with the backend API, providing a lightweight fetch-based client (`apiClient`) and five domain-specific API wrappers: `pcApi` for PC management, `serviceApi` for service/lifecycle management, `healthApi` for health-check operations on PCs, `authApi` for user authentication (register, login, profile retrieval), and `userApi` for admin-level user listing and role management. Together they form the data-access boundary of the frontend.
 
 ---
 
@@ -155,6 +155,30 @@ Thin authentication API service layer that wraps three backend auth endpoints us
 
 ---
 
+## 📄 `userApi.js`
+
+Thin API wrapper for admin-level user management operations (part of the Admin Panel feature). Follows the same convention as `authApi.js` and `pcApi.js`: delegates to `apiClient` methods, returning the standard `{ data, error }` envelope. Targets the `/users` resource group on the backend.
+
+### Imports and dependencies
+
+| Module          | Imported elements       | Type      |
+|-----------------|-------------------------|-----------|
+| `./apiClient`   | `get`, `put`            | Internal  |
+
+### Functions
+
+- **`fetchUsers() → Promise<{ data: any | null, error: string | null }>`** *(exported)*
+  Retrieves the full list of registered users from the backend via a GET request to `/users` (resolves to `/api/users` through the `apiClient._request()` proxy). No parameters required — authentication is handled automatically by `apiClient`'s Bearer token injection.
+  - **Returns:** `{ data, error }` where `data` is the list of user objects (or an error message if the request fails or the caller lacks admin privileges).
+
+- **`updateUserRole(userId: string | number, role: string) → Promise<{ data: any | null, error: string | null }>`** *(exported)*
+  Updates the role of an existing user by sending a PUT request to `/users/:userId/role` with the body `{ role }`. The `apiClient.put()` convenience method handles JSON serialization and automatic authentication header injection.
+  - `userId`: unique identifier of the user whose role is being changed.
+  - `role`: the new role string value (e.g., `"user"`, `"admin"`).
+  - **Returns:** `{ data, error }` with the updated user object or an error message.
+
+---
+
 ## Inter-file relationships
 
 ```
@@ -163,17 +187,18 @@ Thin authentication API service layer that wraps three backend auth endpoints us
 │  (get / post/put/del)│
 └────────┬────────────┘
          │ imported by
-    ┌────┴──────────┐    │
-    │                │    │
-    ▼                ▼    ▼
-┌─────────┐ ┌──────────────┐  ┌──────────┐
-│ pcApi.js│ │serviceApi.js │  │authApi.js│  ← domain-specific layers
-└─────────┘ └──────────────┘  └──────────┘
-    CRUD              CRUD          Auth (3 endpoints)
+    ┌────┴──────────┐    │       │
+    │                │    │       │
+    ▼                ▼    ▼       ▼
+┌─────────┐ ┌──────────────┐  ┌──────────┐ ┌──────────────┐
+│ pcApi.js│ │serviceApi.js │  │authApi.js│ │userApi.js    │  ← domain-specific layers
+└─────────┘ └──────────────┘  └──────────┘ └──────────────┘
+    CRUD              CRUD          Auth       Admin (2 endpoints)
+                                    (3 ep)
 ```
 
 - `apiClient.js` is the **foundation**: zero external imports, pure-fetch abstraction.
-- `pcApi.js`, `serviceApi.js`, and `authApi.js` are **thin wrappers** that map domain concepts onto REST endpoints via `apiClient`. They add no extra logic beyond URL composition.
+- `pcApi.js`, `serviceApi.js`, `authApi.js`, and `userApi.js` are **thin wrappers** that map domain concepts onto REST endpoints via `apiClient`. They add no extra logic beyond URL composition.
 - No inter-dependencies between domain modules; each depends exclusively on `apiClient`.
 
 ---
@@ -193,6 +218,8 @@ Thin authentication API service layer that wraps three backend auth endpoints us
 | `/auth/register`                | POST     | `register(username, password)`     |
 | `/auth/login`                   | POST     | `login(username, password)`        |
 | `/auth/me`                      | GET      | `getMe()`                          |
+| `/users`                        | GET      | `fetchUsers()`                     |
+| `/users/:userId/role`           | PUT      | `updateUserRole(userId, role)`     |
 
 ---
 
@@ -214,3 +241,15 @@ Thin authentication API service layer that wraps three backend auth endpoints us
 - **Updated** `_request()` function documentation: added a dedicated "Authentication header injection" paragraph describing the new behavior — reads the `"token"` key from `localStorage` and attaches `Authorization: Bearer <token>` on every outgoing request.
 - **Noted** that all four exported convenience methods (`get`, `post`, `put`, `del`) inherit this authentication behavior since they all delegate through `_request()`.
 - **Updated** the list of global browser APIs used by `apiClient.js` to include `localStorage` alongside `Headers` and `fetch`.
+
+---
+
+### Changes from Admin Panel — userApi.js addition (T4)
+
+- **Added** full documentation for the new file `userApi.js`:
+  - Imports (`get`, `put` from `./apiClient`).
+  - Two exported functions: `fetchUsers()` (GET `/users`) and `updateUserRole(userId, role)` (PUT `/users/:userId/role` with `{ role }` body).
+  - Both follow the standard `{ data, error }` response envelope via `apiClient` delegation.
+- **Updated** general description: now mentions five domain-specific API wrappers (added `userApi` for admin-level user listing and role management).
+- **Updated** inter-file relationships diagram: added `userApi.js` node labeled "Admin (2 endpoints)".
+- **Updated** API surface summary table: added two rows for `/users` (GET) and `/users/:userId/role` (PUT).

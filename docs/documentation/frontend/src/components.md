@@ -1,10 +1,10 @@
 # `components`
 
 > Path: `frontend/src/components/`
-> Last updated: 2026-07-11
+> Last updated: 2026-07-12
 > Type: Composite folder
 
-React UI components for the GPU Infrastructure Dashboard. Contains six presentational dashboard components (Header, GPUBar, GPUDetails, ServiceRow, PCCard, PCGrid) that follow a strict unidirectional data-flow pattern: they receive data and callbacks as props, perform no data fetching, and delegate all mutations back to the root `App.jsx`. Includes a `Modals/` subfolder with five modal-dialog components for data-entry, editing, and deletion confirmations. Also includes `LoginPage.jsx`, a standalone authentication page that provides tab-based login/register workflows integrated with the global `AuthContext`.
+React UI components for the GPU Infrastructure Dashboard. Contains six presentational dashboard components (Header, GPUBar, GPUDetails, ServiceRow, PCCard, PCGrid) that follow a strict unidirectional data-flow pattern: they receive data and callbacks as props, perform no data fetching, and delegate all mutations back to the root `App.jsx`. Includes a `Modals/` subfolder with five modal-dialog components for data-entry, editing, and deletion confirmations. Also includes two full-page standalone components: `LoginPage.jsx` (authentication with tab-based login/register workflows) and `AdminPanel.jsx` (user role management with toggleable admin/user roles).
 
 ---
 
@@ -33,26 +33,30 @@ This component has no imports; it uses only native browser APIs internally.
 
 ### Functions
 
-#### `Header({ pcs, currentPage, onPageChange }) → JSX.Element` _(default export)_
+#### `Header({ pcs, currentPage, onPageChange, isAdmin }) → JSX.Element` _(default export)_
 
 Renders the application header with title, summary stats, and tab navigation.
 
 - **`pcs: Array<PC>`** — Full array of server objects; used to compute `serverCount` (array length) and `serviceCount` (sum of all `pc.servicios.length`).
-- **`currentPage: string`** _(default: `'dashboard'`)_ — Active page identifier. Accepted values: `'dashboard'` or `'calculator'`. Determines which tab is visually highlighted.
-- **`onPageChange: (pageId: string) => void`** _(optional)_ — Callback invoked when the user clicks a tab. Receives the `id` of the selected tab (`'dashboard'` or `'calculator'`). Guard-checked (`onPageChange && onPageChange(tab.id)`) so it is safe to omit.
+- **`currentPage: string`** _(default: `'dashboard'`)_ — Active page identifier. Accepted values: `'dashboard'`, `'calculator'`, or (conditionally) `'admin'`. Determines which tab is visually highlighted.
+- **`onPageChange: (pageId: string) => void`** _(optional)_ — Callback invoked when the user clicks a tab. Receives the `id` of the selected tab (`'dashboard'`, `'calculator'`, or `'admin'`). Guard-checked (`onPageChange && onPageChange(tab.id)`) so it is safe to omit.
+- **`isAdmin: boolean`** _(default: `false`)_ — Controls whether the "Admin" tab appears in navigation. When `true`, an additional `{ id: 'admin', label: 'Admin' }` entry is conditionally appended to the tabs array via spread syntax. When `false` (the default), only Dashboard and Model Calculator tabs are rendered.
 
 **Tab configuration**:
 
-A local constant array defines the two navigation tabs:
+A local constant defines two base tabs, with a conditional third tab appended via spread syntax when `isAdmin` is `true`:
 ```js
 const tabs = [
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'calculator', label: 'Model Calculator' },
+  ...(isAdmin ? [{ id: 'admin', label: 'Admin' }] : []),
 ];
 ```
 Each tab is rendered via `.map()` producing a `<button>` with `role="tab"` and `aria-selected` bound to the active state. Active tab uses accent-filled styling (`bg-accent text-bg-primary`); inactive tabs use input-bg styling with hover highlight (`bg-bg-input text-text-secondary hover:text-text-primary`). The nav container has `aria-label="Page navigation"`.
 
-**Layout**: Header root `<header>` uses centered flex column (`flex flex-col items-center gap-4`). Inner content is a centered column (`flex flex-col gap-2 text-center items-center`) containing the title, live summary stats, and tab navigation. No conditional rendering — no action buttons are rendered by this component.
+**Conditional Admin tab (T9):** The `isAdmin` prop drives a conditional spread into the tabs array: `...(isAdmin ? [{ id: 'admin', label: 'Admin' }] : [])`. When `true`, a third "Admin" tab renders alongside the Dashboard and Model Calculator tabs, enabling navigation to the `<AdminPanel />` view. When `false` (default), only the two base tabs appear — ensuring non-admin users never see the admin route option in the header.
+
+**Layout**: Header root `<header>` uses centered flex column (`flex flex-col items-center gap-4`). Inner content is a centered column (`flex flex-col gap-2 text-center items-center`) containing the title, live summary stats, and tab navigation. No action buttons are rendered by this component.
 
 ### Accessibility features
 
@@ -323,7 +327,85 @@ Rendered conditionally as a `bg-danger/10` bordered card with `text-danger` mess
 
 ---
 
+## 📄 `AdminPanel.jsx`
+
+Full-page admin component for User Role Management. Displays a responsive table of all registered users showing their username and current role (`'admin'` or `'user'`). Each row has a toggle button to flip the user's role between `'admin'` and `'user'`. After a successful role change, the list auto-refetches via an `onSuccess` callback wired into the mutation hook. Self-contained — no props required.
+
+### Imports and dependencies
+
+| Module | Imported elements | Type |
+|--------|-------------------|------|
+| `../hooks/useUsers.js` | `useUsers` (default) | Internal |
+| `../hooks/useUpdateUserRole.js` | `useUpdateUserRole` (default) | Internal |
+
+### Functions
+
+#### `AdminPanel() → JSX.Element` _(default export)_
+
+Renders a full-page administrative UI for toggling user roles. No props — all state and data flow comes through the two custom hooks it consumes.
+
+**Hook consumption:**
+
+Two hooks are invoked at the top level:
+
+```js
+const { data: users, loading, error: fetchError, refetch } = useUsers();
+const { loading: updating, error: updateError, mutate, clearError }
+  = useUpdateUserRole({ onSuccess: refetch });
+```
+
+| Hook | Key values consumed | Purpose |
+|------|---------------------|---------|
+| `useUsers()` | `data` (aliased to `users`), `loading`, `error` (aliased to `fetchError`), `refetch` | Fetches the full user list from the API. Provides refetch for both auto-refresh after mutations and manual retry on fetch errors. |
+| `useUpdateUserRole({ onSuccess: refetch })` | `loading` (aliased to `updating`), `error` (aliased to `updateError`), `mutate`, `clearError` | Role mutation hook configured to call `refetch` after a successful role change, ensuring the table stays in sync. |
+
+**Loading guard:**
+If `loading` is truthy, renders a fullscreen centered spinner (inline SVG with `animate-spin`) on a `bg-bg-primary` background — identical pattern used in `LoginPage.jsx` and `App.jsx`. The spinner is a 40×40px circle with partial arc fill (`text-accent`, 4px stroke weight).
+
+**Fetch error guard:**
+If `fetchError` is truthy, renders a centered card dialog containing the page title ("User Management"), a danger-styled alert banner (`bg-danger/10 border border-danger/30`) with the error message, and a full-width "Retry" button that calls `refetch()` on click. Uses accent-filled button styling (`bg-accent text-bg-primary hover:bg-accent-hover`).
+
+**Internal handler — `handleToggle(userId, currentRole)`:**
+Zero-arg arrow function wired to each row's toggle button. Computes the inverse role: `` const nextRole = currentRole === 'admin' ? 'user' : 'admin' `` and passes both values to `mutate(userId, nextRole)`. This triggers the mutation hook's side effect (an API PATCH/PUT call) which, upon success, fires the `onSuccess` callback (`refetch`) to reload the user list.
+
+**Main render — three rendering states:**
+
+1. **Mutation error banner (conditional):** `{updateError && (...)}` — A horizontally arranged danger banner with the error message on the left and a "Dismiss" text button on the right that calls `clearError()`. Positioned above the table within the same content flow as the page title. Dismiss button uses muted styling (`text-text-muted hover:text-text-secondary`) with horizontal margin separation.
+
+2. **Empty state:** `{users.length === 0}` — Centered text inside the card container: "No users found" with `py-12` padding and secondary text color. No table is rendered in this case.
+
+3. **Populated table:** Semantic `<table>` with three columns — Username, Role, Action. Entirely responsive via `overflow-x-auto` wrapper on the containing `<div>`.
+   - **Username column:** Monospace-styled (`font-mono`) primary text.
+   - **Role column:** Pill badge that dynamically styles based on role value. Admin users receive a green pill (`bg-gpu-green/20 text-gpu-green`); regular users receive a neutral muted pill (`bg-bg-hover text-text-muted`). Badge uses `inline-block px-3 py-1 rounded-full text-xs font-medium`.
+   - **Action column:** Toggle button with conditional styling and label:
+     - If user is admin → "Revoke Admin" with danger-styled appearance (`bg-danger/10 text-danger hover:bg-danger/20 border border-danger/30`).
+     - If user is regular → "Make Admin" with accent-styled appearance (`bg-accent/10 text-accent hover:bg-accent/20 border border-accent/30`).
+     - Button is `disabled={updating}` during any in-flight mutation, applying opacity dim and cursor-block styling.
+
+**Table accessibility:** Each row is keyed by `user.userId` (the stable identifier returned by the auth API; previously `user._id` which caused "Invalid user ID format" errors during role mutations). Table headers use `text-xs font-mono uppercase tracking-wide` for a consistent terminal-style header aesthetic matching the dashboard design language. Row hover states transition to `bg-bg-hover`. Bottom border on each row (removed on last row via `last:border-b-0`).
+
+---
+
 ## 🔄 Changes in this update
+
+### AdminPanel.jsx — Fix user ID references (`user._id` → `user.userId`)
+- **Updated** `AdminPanel.jsx` at two locations: (1) row key prop changed from `key={user._id}` to `key={user.userId}` (line 84); (2) toggle handler call changed from `handleToggle(user._id, user.role)` to `handleToggle(user.userId, user.role)` (line 103).
+- **Bug fixed:** Previously both references used `user._id` which is a MongoDB ObjectId string. The `useUpdateUserRole` hook's `mutate()` function expects a `userId` parameter — passing `_id` triggered an "Invalid user ID format" error when attempting to grant/revoke admin permissions. The correct identifier is `user.userId`, which matches the shape returned by the auth API's user list endpoint.
+- **Impact:** Role toggles ("Make Admin" / "Revoke Admin") now correctly route through the mutation hook without validation errors.
+
+### T9 — Header.jsx conditional Admin tab via `isAdmin` prop
+- **Updated** `Header.jsx` function signature: added `isAdmin = false` as a new default parameter alongside `pcs`, `currentPage = 'dashboard'`, and `onPageChange`. When `true`, the tabs array conditionally appends `{ id: 'admin', label: 'Admin' }` via spread syntax (`...(isAdmin ? [{ id: 'admin', label: 'Admin' }] : [])`). When `false` (default), only Dashboard and Model Calculator tabs render.
+- **Updated** accepted `currentPage` values to now include `'admin'` in addition to `'dashboard'` and `'calculator'`.
+- **Impact:** Non-admin users see only two navigation tabs; admin users see a third "Admin" tab that navigates to `<AdminPanel />`. This keeps the Admin route visible only to authorized users at the header level.
+
+---
+
+### AdminPanel.jsx — New User Role Management component
+- **Added** full documentation for `AdminPanel.jsx` as a new direct file in the components composite folder.
+- Documented hook consumption (`useUsers()` and `useUpdateUserRole({ onSuccess: refetch })`), three guard states (loading spinner, fetch-error dialog with retry, mutation error banner with dismiss), internal `handleToggle()` handler, conditional role badge styling (green pills for admin, muted pills for user), toggle buttons with inverted labels ("Make Admin" / "Revoke Admin"), and the empty-state table row.
+- This component is self-contained (no props) and auto-refreshes the user list after each successful role mutation via the `onSuccess: refetch` callback wired into `useUpdateUserRole`.
+
+---
 
 ### LoginPage.jsx — New authentication page component
 - **Added** full documentation for `LoginPage.jsx` as a new direct file in the components composite folder.

@@ -57,6 +57,17 @@ async function registerRoutes() {
   }
 
   try {
+    const usersModule = await import('./routes/users.js');
+    app.use('/api/users', usersModule.default);
+    console.log('[server] ✓ Users router registered at /api/users');
+  } catch {
+    console.warn(
+      '[server] ⚠ Users router not found — ' +
+      '/api/users endpoints unavailable (create routes/users.js)'
+    );
+  }
+
+  try {
     const healthModule = await import('./routes/health.js');
     app.use('/api/check-health', healthModule.default);
     console.log('[server] ✓ Health router registered at /api/check-health');

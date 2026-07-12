@@ -21,6 +21,7 @@ import useServiceHealth from './hooks/useServiceHealth.js';
 import Header               from './components/Header.jsx';
 import PCGrid               from './components/PCGrid.jsx';
 import GPUCalculatorPage    from './components/GpuCalculator/GPUCalculatorPage.jsx';
+import AdminPanel           from './components/AdminPanel.jsx';
 
 import AddPcModal           from './components/Modals/AddPcModal.jsx';
 import EditPcModal          from './components/Modals/EditPcModal.jsx';
@@ -32,23 +33,6 @@ export default function App() {
   /* ── Auth hooks — must fire before any data hooks ─────────── */
   const { user, isAuthenticated, isLoading } = useAuth();
   const isAdmin = user?.role === 'admin';
-
-  /* Guard: show spinner while auth state resolves */
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-bg-primary flex items-center justify-center">
-        <svg className="animate-spin h-10 w-10 text-accent" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/>
-        </svg>
-      </div>
-    );
-  }
-
-  /* Guard: unauthenticated users see the login page */
-  if (!isAuthenticated) {
-    return <LoginPage />;
-  }
 
   /* ── Query hook — master PC list with automatic initial fetch ── */
   const { data: pcs, loading, refetch } = usePcs();
@@ -71,8 +55,25 @@ export default function App() {
    */
   const [modalState, setModalState] = useState({ type: null, payload: null });
 
-  /* State: Page router — 'dashboard' (default) or 'calculator' */
+  /* State: Page router — 'dashboard' (default), 'admin', or 'calculator' */
   const [currentPage, setCurrentPage] = useState('dashboard');
+
+  /* Guard: show spinner while auth state resolves */
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-bg-primary flex items-center justify-center">
+        <svg className="animate-spin h-10 w-10 text-accent" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/>
+        </svg>
+      </div>
+    );
+  }
+
+  /* Guard: unauthenticated users see the login page */
+  if (!isAuthenticated) {
+    return <LoginPage />;
+  }
 
   /* ── Callback handlers ──────────────────────────────────────── */
 
@@ -212,12 +213,13 @@ export default function App() {
         currentPage={currentPage}
         onPageChange={handlePageChange}
         pcs={pcs}
+        isAdmin={isAdmin}
       />
 
-      {/* Page router: dashboard (grid + modals) vs calculator */}
-      {currentPage === 'dashboard' ? (
-        <>
-          {/* Responsive grid of PC cards with editing actions */}
+       {/* Page router: dashboard (grid + modals), admin user management, or calculator */}
+       {currentPage === 'dashboard' ? (
+         <>
+           {/* Responsive grid of PC cards with editing actions */}
           <PCGrid
             pcs={pcs}
             loading={loading}
@@ -291,9 +293,11 @@ export default function App() {
             />
           )}
         </>
-      ) : (
-        <GPUCalculatorPage />
-      )}
+       ) : currentPage === 'admin' ? (
+         <AdminPanel />
+       ) : (
+         <GPUCalculatorPage />
+       )}
 
       {/* Floating "Refresh Health" button — dashboard only */}
       {currentPage === 'dashboard' && (

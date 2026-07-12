@@ -68,17 +68,21 @@ Application header component that sits at the top of the page layout. Displays t
 
 #### Functions
 
-- **`Header(pcs: Array, currentPage: string = 'dashboard', onPageChange: (pageId: string) => void) → JSX.Element`** *(default export)*
-  Renders the top-level header bar. Computes aggregate statistics (`serverCount`, `serviceCount`) from the `pcs` array and delegates tab-switching to the `onPageChange` callback. Contains no action buttons or modals — pure presentation.
+- **`Header(pcs: Array, currentPage: string = 'dashboard', onPageChange: (pageId: string) => void, isAdmin: boolean = false) → JSX.Element`** *(default export)*
+  Renders the top-level header bar. Computes aggregate statistics (`serverCount`, `serviceCount`) from the `pcs` array and delegates tab-switching to the `onPageChange` callback. Conditionally renders an "Admin" tab when `isAdmin` is `true`. Contains no action buttons or modals — pure presentation.
   - `pcs`: Full array of server objects; used to compute `{serverCount, serviceCount}` statistics. The service count safely handles missing or non-array `servicios` via `Array.isArray()` guard.
-  - `currentPage`: Current active tab identifier (`'dashboard'` or `'calculator'`). Defaults to `'dashboard'`. Controls which tab appears selected (via `aria-selected`).
+  - `currentPage`: Current active tab identifier (`'dashboard'`, `'calculator'`, or `'admin'`). Defaults to `'dashboard'`. Controls which tab appears selected (via `aria-selected`).
   - `onPageChange`: Callback to switch between tabs; receives the target tab ID string. Guarded with truthy check before invocation (`onPageChange && onPageChange(tab.id)`).
+  - `isAdmin`: Boolean flag that conditionally appends an Admin tab to the navigation. Defaults to `false`. When `true`, a third tab `{ id: 'admin', label: 'Admin' }` is spread into the tabs array, enabling admin users to navigate to `<AdminPanel />`.
 
   **Tab configuration (local constant):**
-  | id | label | Tailwind active styling | Tailwind inactive styling |
-  |----|-------|------------------------|--------------------------|
-  | `dashboard` | Dashboard | `bg-accent text-bg-primary` | `bg-bg-input text-text-secondary hover:text-text-primary` |
-  | `calculator` | Calculadora GPU | `bg-accent text-bg-primary` | `bg-bg-input text-text-secondary hover:text-text-primary` |
+  | id | label | Tailwind active styling | Tailwind inactive styling | Notes |
+  |----|-------|------------------------|--------------------------|-------|
+  | `dashboard` | Dashboard | `bg-accent text-bg-primary` | `bg-bg-input text-text-secondary hover:text-text-primary` | Always rendered |
+  | `calculator` | Model Calculator | `bg-accent text-bg-primary` | `bg-bg-input text-text-secondary hover:text-text-primary` | Always rendered |
+  | `admin` | Admin | `bg-accent text-bg-primary` | `bg-bg-input text-text-secondary hover:text-text-primary` | Only rendered when `isAdmin === true` (via spread syntax) |
+
+  **Conditional Admin tab (T9):** The tabs array uses conditional spread — `...(isAdmin ? [{ id: 'admin', label: 'Admin' }] : [])` — to inject a third navigation option exclusively for users whose role is `'admin'`. This keeps the admin route invisible at the header level for non-admin users.
 
   **Accessibility features:**
   - Live region: server/service counter wrapped in `<span aria-live="polite">` for screen-reader announcements on data changes.

@@ -15,7 +15,7 @@ where-is-my-model/
 │   │   ├── PC.js                  # Schema: {nombre, ip, vram, servicios[]}, virtual totalGpu, GPU cap validator
 │   │   └── User.js                # [AUTH] Schema: {username (unique), password (bcrypt), role ('admin'|'user')}
 │   ├── routes/
-    │   │   ├── auth.js            # [AUTH] POST /register, POST /login, GET /me
+    │   │   ├── auth.js            # [AUTH] POST /register, POST /login, GET /me, GET /users, PUT /users/:userId/role
     │   │   ├── pcs.js             # GET /, GET /:id, POST /, PUT /:id, DELETE /:id (+ auth middleware)
     │   │   ├── services.js        # GET /, POST /, PUT /:index, DELETE /:index (+ auth middleware)
     │   │   └── health.js          # POST /check-health/pcs/:pcId, POST /check-health/all
