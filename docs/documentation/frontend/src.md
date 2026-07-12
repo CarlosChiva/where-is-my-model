@@ -24,13 +24,13 @@ React source files for the GPU Infrastructure Dashboard frontend application, sc
 
 ## 📄 `App.jsx`
 
-Root React component of the GPU Infrastructure Dashboard. Orchestrates the full application: enforces authentication at the top level (loading guard while auth resolves, unauthenticated redirect to `<LoginPage />`). All React hooks — `useAuth`, `usePcs`, six mutation hooks, `useServiceHealth`, and both `useState` calls — fire unconditionally at the top of the component **before** any early returns, in strict compliance with React's Rules of Hooks (fixed: previously `usePcs()` and mutation hooks invoked only "behind auth gates", causing "order of Hooks changed" errors between renders). A service health check hook (`useServiceHealth`) for per-service TCP status monitoring. Manages modal routing via a single state object, renders two floating action buttons ("Refresh Health" and "Add PC") on the dashboard view, and uses a three-way page router to conditionally render the **dashboard** (PC card grid + modals), **admin** (`<AdminPanel />`, self-contained user management), or **calculator** (`<GPUCalculatorPage />`). Eight CRUD handlers are role-gated (admin-only) — non-admin users receive silent no-op functions that prevent destructive operations without generating 401 errors. Each mutation hook is wired to `refetch` the master PC list on success. The `<AdminPanel>` component is fully self-contained — no hooks or callbacks were lifted into `App.jsx` for it.
+Root React component of the GPU Infrastructure Dashboard. Orchestrates the full application: enforces authentication at the top level (loading guard while auth resolves, unauthenticated redirect to `<LoginPage />`). All React hooks — `useAuth`, `usePcs`, six mutation hooks, `useServiceHealth`, and both `useState` calls — fire unconditionally at the top of the component **before** any early returns, in strict compliance with React's Rules of Hooks (fixed: previously `usePcs()` and mutation hooks invoked only "behind auth gates", causing "order of Hooks changed" errors between renders). A service health check hook (`useServiceHealth`) for per-service TCP status monitoring. A post-auth refetch effect (`useEffect`) automatically reloads the master PC list and probes all service health statuses when authentication resolves successfully — ensuring the dashboard is fully populated after login without requiring a manual refresh (F5). Manages modal routing via a single state object, renders two floating action buttons ("Refresh Health" and "Add PC") on the dashboard view, and uses a three-way page router to conditionally render the **dashboard** (PC card grid + modals), **admin** (`<AdminPanel />`, self-contained user management), or **calculator** (`<GPUCalculatorPage />`). Eight CRUD handlers are role-gated (admin-only) — non-admin users receive silent no-op functions that prevent destructive operations without generating 401 errors. Each mutation hook is wired to `refetch` the master PC list on success. The `<AdminPanel>` component is fully self-contained — no hooks or callbacks were lifted into `App.jsx` for it.
 
 ### Imports and dependencies
 
 | Module | Imported elements | Type |
 |--------|-------------------|------|
-| `react` | `useState` | External |
+| `react` | `useState`, `useEffect` | External |
 | `./context/AuthContext.jsx` | `useAuth` | Internal |
 | `./components/LoginPage.jsx` | `LoginPage` | Internal |
 | `./hooks/usePcs.js` | `usePcs` | Internal |
@@ -58,9 +58,10 @@ Root React component of the GPU Infrastructure Dashboard. Orchestrates the full 
 |------|----------|---------------|------|
 | `useAuth` | `{ user, isAuthenticated, isLoading }` | — | Authentication context consumer. `user` holds the current user object (with `role` field), `isAuthenticated` is a boolean guard, `isLoading` indicates whether the session check is still in progress (firewall before any data hooks). |
 | *(derived)* | `isAdmin` | — | Computed flag: `user?.role === 'admin'`. Used by all role-gated CRUD handlers to decide whether to wire real callbacks or silent no-ops. |
+| `usePcs` | `{ data: pcs, loading, refetch }` | — | Master PC list hook — fetches the full fleet of GPU servers, exposes `pcs` (array), `loading` (boolean), and `refetch` (stable callback for manual re-fetching). Auto-fetches on mount when a token is present in `localStorage`. Used by the post-auth refetch effect (see below) to reload data after login. |
 | `useState` | `modalState` | `{ type: null, payload: null }` | Modal router — `type` determines which modal renders, `payload` carries data forwarded to it. |
-| `useState` | `currentPage` | `'dashboard'` | Page router — switches between `'dashboard'` (default), `'admin'`, and `'calculator'` views. Changing pages also closes any open modal via `handlePageChange`. Both FAB buttons are scoped to the dashboard only (`{ currentPage === 'dashboard' && ... }`). |
-| `useServiceHealth` | `serviceHealth` | — | Health check hook instance exposing `loading` (boolean), `checkAll()` (triggers TCP probes for all services across all PCs). Passed as `serviceHealth` prop to `<PCGrid>` and wired to the "Refresh Health" FAB button via `onClick={() => serviceHealth.checkAll()}`. |
+| `useState` | `currentPage` | `'dashboard'` | Page router — switches between `'dashboard'` (default), `'admin'`, and `'calculator'` views. Changing pages also closes any open modal via `handlePageChange`. Both FAB buttons are scoped to the dashboard only (`{ currentPage === 'dashboard' && ... }`). The "Add PC" FAB additionally requires `isAdmin` to be truthy. |
+| `useServiceHealth` | `serviceHealth` | — | Health check hook instance exposing `loading` (boolean), `checkAll()` (triggers TCP probes for all services across all PCs). Passed as `serviceHealth` prop to `<PCGrid>` and wired to the "Refresh Health" FAB button via `onClick={() => serviceHealth.checkAll()}`. Also consumed by the post-auth refetch effect to trigger a full fleet health probe after login. |
 
 ### Callback handlers
 
@@ -103,6 +104,17 @@ Root React component of the GPU Infrastructure Dashboard. Orchestrates the full 
 - **`handleConfirmDelete() → Promise<void>` ⭐ Role-gated**
   Admin: confirmation handler for delete modals. Dispatches based on `modalState.payload.actionType`: `'pc'` calls `deletePcHook.mutate(pcId)`, `'service'` calls `deleteServiceHook.mutate({ pcId, index })`. Awaits the mutation result and only closes the modal on success (`if (!result?.error) { closeModal(); }`). On error, the modal stays open and the `DeleteConfirmModal` displays the API error banner. Non-admin: silent no-op `() => {}`.
 
+### Post-auth refetch effect (new `useEffect`)
+
+A `useEffect` hook listens to changes in both `isAuthenticated` and `isLoading`. When authentication resolves successfully — i.e., `isAuthenticated` becomes `true` and `isLoading` becomes `false` — it fires two actions:
+
+1. **`refetch()`** — re-fetches the master PC list from the backend via the `usePcs()` hook's stable callback (ensures fresh data after login).
+2. **`serviceHealth.checkAll()`** — triggers a full fleet health probe across all services on all PCs.
+
+**Dependency array:** `[isAuthenticated, isLoading, refetch, serviceHealth.checkAll]`. Both `refetch` and `serviceHealth.checkAll` are stable references (wrapped in `useCallback` internally within their respective hooks), so this effect fires only when the auth state transitions (initial login or explicit logout followed by re-authentication).
+
+> **Purpose:** Before this effect, a successful login transitioned from `<LoginPage />` to the dashboard via React's declarative rendering (no page reload). However, `usePcs()` only auto-fetches on mount if a token is present in `localStorage`. During a fresh login session (where the token was written *by* the login flow, not pre-existing), the dashboard could render with stale or empty data until the user manually clicked "Refresh Health" or navigated away and back. This effect ensures that every time authentication completes, the master PC list is re-fetched and all service health statuses are probed — providing a fully populated dashboard immediately after login without requiring F5.
+
 ### Auth guards (early returns before main render)
 
 Two top-level guards execute **after** all hooks have fired unconditionally (to comply with React's Rules of Hooks):
@@ -116,10 +128,10 @@ Two top-level guards execute **after** all hooks have fired unconditionally (to 
 
 The component renders (only reached after both auth guards pass):
 1. **`Header`** — server count summary, "Add PC" button, and "Export JSON" button (which internally serializes `pcs` to a timestamped JSON file download via native browser APIs).
-2. **`PCGrid`** — responsive grid of PC cards with editing, add-service, and delete actions. Receives `serviceHealth={serviceHealth}` for per-service TCP status display within each card.
+2. **`PCGrid`** — responsive grid of PC cards with editing, add-service, and delete actions. Receives `serviceHealth={serviceHealth}` for per-service TCP status display within each card. Receives `isAdmin={isAdmin}` to gate admin-only action buttons inside the grid (hides edit/delete/add-service UI from non-admin users entirely).
 3. **FAB buttons** (dashboard-only):
    * **"Refresh Health"** — positioned at `bottom-[6.5rem] right-6` (above the "Add PC" FAB). Calls `serviceHealth.checkAll()` on click. Icon (refresh/circular arrows SVG) gets a conditional `animate-spin` class when `serviceHealth.loading` is truthy, providing visual feedback during health probes. Same styling as the existing "Add PC" FAB: `w-12 h-12 md:w-14 md:h-14`, rounded, accent-coloured, with shadow and hover/active transitions.
-   * **"Add PC"** — positioned at `bottom-6 right-6`. Calls `handleOpenAddPc` which is role-gated: admin opens the AddPcModal via `setModalState({ type: 'addPc', payload: null })`, non-admin receives a silent no-op.
+   * **"Add PC"** — positioned at `bottom-6 right-6`. Conditional render guard is `currentPage === 'dashboard' && isAdmin` (dual-gated: dashboard page AND admin role). Calls `handleOpenAddPc` on click which opens the AddPcModal. Non-admin users never see this button at all — it is conditionally rendered out entirely when `isAdmin` is falsy.
 3. **Modal routing** — conditionally renders one of five modals based on `modalState.type`:
    - `'addPc'` → `AddPcModal` (receives `loading`, `error`, `clearError` from `createPcHook`)
    - `'editPc'` → `EditPcModal` (receives `loading`, `error`, `clearError` from `updatePcHook`)

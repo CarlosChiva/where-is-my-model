@@ -37,8 +37,8 @@ Fetches and manages the master list of GPU servers. Uses a monotonic fetch count
     - **Behavior on error:** Sets `error` to the error message. Distinguishes between `result.error` (API-level) and caught exceptions (`err instanceof Error ? err.message : String(err)`).
     - **Concurrent fetch handling:** If a new fetch is initiated while an older one is in-flight, the older response is silently discarded at three checkpoints: after the `await`, in the `catch` block, and in the `finally` block (prevents `loading` from being reset prematurely).
 
-  - **`useEffect(() => fetchPCs(), [fetchPCs])`**
-    Triggers the initial fetch on component mount. Dependency array includes `fetchPCs` (stable due to `useCallback`), so it runs exactly once.
+  - **`useEffect(() => { const storedToken = localStorage.getItem('token'); if (storedToken) { fetchPCs(); } }, [fetchPCs])`**
+    Triggers the initial fetch on component mount **only if an authentication token is present in `localStorage`**. This defensive check prevents premature 401 errors when the hook mounts before the user has authenticated. Dependency array includes `fetchPCs` (stable due to `useCallback`), so it runs exactly once on mount.
 
 ---
 
@@ -231,6 +231,43 @@ Mutation hook for editing a service on a GPU server. Calls the `updateService` A
 
   - **`clearError() → void`**
     Resets the `error` state to `null`. Used by parent components (e.g., `EditServiceModal`) to dismiss stale API error messages when the modal reopens or the user takes action.
+
+---
+
+## 📄 `useServiceHealth.js`
+
+Centralized per-service TCP health status manager. Maintains a flat map keyed by `"pcId---serviceIndex"` with values `'up'`, `'down'`, or `null` (not yet checked). Auto-charges on mount with a StrictMode safeguard (`mountedRef`) to prevent double-firing during React's development-time strict mode. Self-contained — accepts no props. Uses a monotonic request counter like `usePcs` and `useUsers` to discard stale responses.
+
+### Imports and dependencies
+
+| Module | Imported elements | Type |
+|--------|-------------------|------|
+| `react` | `useState`, `useEffect`, `useCallback`, `useRef` | External |
+| `../services/healthApi.js` | `checkPcHealth`, `checkAllHealth` | Internal |
+
+### Functions
+
+- **`useServiceHealth() → { statuses: Object, loading: boolean, checkSinglePc: Function, checkAll: Function }`**
+  Custom hook that manages TCP health status for all services across the fleet. Initializes `statuses` to `{}`, `loading` to `false`.
+  - **Returns:** An object containing:
+    - `statuses`: Flat map of `"pcId---serviceIndex": 'up' | 'down' | null`
+    - `loading`: Boolean — `true` during in-flight health check
+    - `checkSinglePc`: Function to re-check a single GPU server's services
+    - `checkAll`: Function to re-check all servers
+
+  **Internal functions:**
+
+  - **`flattenResults(data: Array) → Object`**
+    Parses the backend array response into a flat `{ key: status }` map. Iterates over each entry's `services` array, constructing keys as `` `${entry.pcId}---${svc.index}` ``. Defaults to `'down'` when `svc.status` is falsy. Returns empty object if input is not an array.
+
+  - **`checkAll() → Promise<void>`** *(wrapped in `useCallback` with empty deps)*
+    Hits the backend for the entire fleet's health status. Uses monotonic counter (`requestCounter`) to discard stale responses. On error, keeps previous statuses and clears loading without resetting the map. On success, merges new results into the existing `statuses` state using a functional updater.
+
+  - **`checkSinglePc(pcId: string) → Promise<void>`** *(wrapped in `useCallback` with empty deps)*
+    Hits the backend for a single server's health status. Guards with `if (!pcId) return`. Same stale-response discarding logic as `checkAll`. Wraps `[result.data]` when calling `flattenResults` to normalize the single-entry response.
+
+  - **`useEffect(() => { if (mountedRef.current) return; mountedRef.current = true; checkAll(); }, [checkAll])`**
+    Auto-checks all services on initial mount using a StrictMode guard (`mountedRef`). Ensures `checkAll()` fires once per real page load rather than twice during React's development strict mode.
 
 ---
 

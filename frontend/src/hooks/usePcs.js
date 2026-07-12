@@ -43,9 +43,12 @@ export default function usePcs() {
     }
   }, []);
 
-  /* Initial load on mount */
+  /* Initial load on mount — only if token is already present, to avoid 401 race */
   useEffect(() => {
-    fetchPCs();
+    const storedToken = localStorage.getItem('token');
+    if (storedToken) {
+      fetchPCs();
+    }
   }, [fetchPCs]);
 
   return { data, loading, error, refetch: fetchPCs };
