@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 /* ── Auth Context ──────────────────────────────────────────── */
 import { useAuth }      from './context/AuthContext.jsx';
@@ -11,7 +11,6 @@ import usePcs           from './hooks/usePcs.js';
 import useCreatePc      from './hooks/useCreatePc.js';
 import useUpdatePc      from './hooks/useUpdatePc.js';
 import useDeletePc      from './hooks/useDeletePc.js';
-import useServices      from './hooks/useServices.js';
 import useCreateService from './hooks/useCreateService.js';
 import useUpdateService from './hooks/useUpdateService.js';
 import useDeleteService from './hooks/useDeleteService.js';
@@ -48,13 +47,25 @@ export default function App() {
   /* ── Health check hook — per-service TCP status manager ─── */
   const serviceHealth      = useServiceHealth();
 
-  /* Post-auth refetch trigger — fires when authentication resolves */
+  /* ── 1. Post-auth refetch (auth-change only) ────────────────── */
   useEffect(() => {
     if (isAuthenticated && !isLoading) {
       refetch();
-      serviceHealth.checkAll();
     }
-  }, [isAuthenticated, isLoading, refetch, serviceHealth.checkAll]);
+  }, [isAuthenticated, isLoading, refetch]);
+
+  /* ── 2. Initial health check (runs once after pcs load) ─────── */
+  const healthCheckedRef = useRef(false);
+
+  useEffect(() => {
+    if (healthCheckedRef.current) return;
+    if (!isAuthenticated || pcs.length === 0) return;
+    healthCheckedRef.current = true;
+    if (serviceHealth.checkAll) {
+      const ids = pcs.map(pc => pc._id);
+      serviceHealth.checkAll(ids);
+    }
+  }, [isAuthenticated, pcs, serviceHealth]);
 
   /*
    * State: Modal router — single object pattern.
@@ -311,11 +322,11 @@ export default function App() {
       {currentPage === 'dashboard' && (
         <button
           type="button"
-          onClick={() => serviceHealth.checkAll()}
+          onClick={() => serviceHealth.checkAll(pcs.map(pc => pc._id))}
           aria-label="Refresh service health"
           className="fixed bottom-[6.5rem] right-6 z-40 w-12 h-12 md:w-14 md:h-14 rounded-full bg-accent text-bg-primary shadow-fab hover:bg-accent-hover active:scale-95 transition-all flex items-center justify-center focus:outline-none focus:ring-[0_0_0_3px] focus:ring-accent-dim"
         >
-          <span className={serviceHealth.loading ? 'animate-spin' : ''}>
+          <span className={serviceHealth.anyPcLoading() ? 'animate-spin' : ''}>
             <svg
               xmlns="http://www.w3.org/2000/svg"
               width="24"

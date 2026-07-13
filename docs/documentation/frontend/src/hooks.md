@@ -1,7 +1,7 @@
 # `hooks`
 
 > Path: `frontend/src/hooks/`
-> Last updated: 2026-07-12 (T7 — useDeleteUser)
+> Last updated: 2026-07-13 (useServiceHealth — auto-check removed)
 > Type: Leaf folder
 
 Custom React hooks for the GPU Infrastructure Dashboard frontend. Provides data-fetching hooks for loading the master list of GPU servers (`usePcs`), per-server services (`useServices`), and the application user list (`useUsers`), eight mutation hooks for CRUD operations on PCs, services, and users (create, update, delete, role management), and a health-monitoring hook for per-service TCP status (`useServiceHealth`). Most CRUD hooks follow a consistent pattern: they manage `loading` and `error` state, expose an `onSuccess` callback for side effects, and return a simple object with reactive state and a mutation function. The two list-fetching hooks (`usePcs`, `useUsers`) share an identical monotonic fetch-counter staleness guard to prevent race conditions on rapid refetches.
@@ -236,38 +236,44 @@ Mutation hook for editing a service on a GPU server. Calls the `updateService` A
 
 ## 📄 `useServiceHealth.js`
 
-Centralized per-service TCP health status manager. Maintains a flat map keyed by `"pcId---serviceIndex"` with values `'up'`, `'down'`, or `null` (not yet checked). Auto-charges on mount with a StrictMode safeguard (`mountedRef`) to prevent double-firing during React's development-time strict mode. Self-contained — accepts no props. Uses a monotonic request counter like `usePcs` and `useUsers` to discard stale responses.
+Centralized per-service TCP health status manager. Maintains a flat map keyed by `"pcId---serviceIndex"` with values `'up'`, `'down'`, or `null` (not yet checked). Self-contained — accepts no props. Tracks loading state per-PC using a `Set` of in-flight `pcId`s, exposing `isPcLoading(pcId)` and `anyPcLoading()` helpers for granular per-server loading indicators. Uses `Set`-based per-PC loading tracking (no global `loading` boolean and no monotonic request counter). Auto-check on mount has been **removed entirely** — initial health check is now coordinated from `App.jsx` using a one-time ref guard.
 
 ### Imports and dependencies
 
 | Module | Imported elements | Type |
 |--------|-------------------|------|
-| `react` | `useState`, `useEffect`, `useCallback`, `useRef` | External |
-| `../services/healthApi.js` | `checkPcHealth`, `checkAllHealth` | Internal |
+| `react` | `useState`, `useCallback` | External |
+| `../services/healthApi.js` | `checkPcHealth` | Internal |
 
 ### Functions
 
-- **`useServiceHealth() → { statuses: Object, loading: boolean, checkSinglePc: Function, checkAll: Function }`**
-  Custom hook that manages TCP health status for all services across the fleet. Initializes `statuses` to `{}`, `loading` to `false`.
+- **`useServiceHealth() → { statuses: Object, isPcLoading: Function, anyPcLoading: Function, checkSinglePc: Function, checkAll: Function }`**
+  Custom hook that manages TCP health status for all services across the fleet. Initializes `statuses` to `{}` and `loadingPcs` to a new `Set()`. Does **not** fire an auto-check on mount — that responsibility has been delegated to `App.jsx`.
   - **Returns:** An object containing:
     - `statuses`: Flat map of `"pcId---serviceIndex": 'up' | 'down' | null`
-    - `loading`: Boolean — `true` during in-flight health check
+    - `isPcLoading`: Function to check if a specific PC's health check is in-flight
+    - `anyPcLoading`: Function to check if any PC's health check is in-flight
     - `checkSinglePc`: Function to re-check a single GPU server's services
-    - `checkAll`: Function to re-check all servers
+    - `checkAll`: Function to re-check multiple servers concurrently
 
   **Internal functions:**
 
   - **`flattenResults(data: Array) → Object`**
     Parses the backend array response into a flat `{ key: status }` map. Iterates over each entry's `services` array, constructing keys as `` `${entry.pcId}---${svc.index}` ``. Defaults to `'down'` when `svc.status` is falsy. Returns empty object if input is not an array.
 
-  - **`checkAll() → Promise<void>`** *(wrapped in `useCallback` with empty deps)*
-    Hits the backend for the entire fleet's health status. Uses monotonic counter (`requestCounter`) to discard stale responses. On error, keeps previous statuses and clears loading without resetting the map. On success, merges new results into the existing `statuses` state using a functional updater.
-
   - **`checkSinglePc(pcId: string) → Promise<void>`** *(wrapped in `useCallback` with empty deps)*
-    Hits the backend for a single server's health status. Guards with `if (!pcId) return`. Same stale-response discarding logic as `checkAll`. Wraps `[result.data]` when calling `flattenResults` to normalize the single-entry response.
+    Hits the backend for a single server's health status via `checkPcHealth(pcId)`. Guards with `if (!pcId) return`. On call, adds `pcId` to the `loadingPcs` Set. On error or success, removes `pcId` from the Set. On success, merges new results into `statuses` using a functional updater with `flattenResults([result.data])` to normalize the single-entry response.
 
-  - **`useEffect(() => { if (mountedRef.current) return; mountedRef.current = true; checkAll(); }, [checkAll])`**
-    Auto-checks all services on initial mount using a StrictMode guard (`mountedRef`). Ensures `checkAll()` fires once per real page load rather than twice during React's development strict mode.
+  - **`checkAll(pcIds: Array) → Promise<void>`** *(wrapped in `useCallback` with `[checkSinglePc]` deps)*
+    Accepts an array of `pcId`s and fires `checkSinglePc(id)` for each concurrently. Guards with `if (!Array.isArray(pcIds) || pcIds.length === 0) return`. Maps over `pcIds` to produce an array of promises, then returns `Promise.allSettled(promises)`. Each `pcId` is tracked individually in `loadingPcs`.
+
+  - **`isPcLoading(pcId: string) → boolean`** *(wrapped in `useCallback` with `[loadingPcs]` deps)*
+    Helper that returns `true` if `loadingPcs.has(pcId)`. Used by components to show per-server loading spinners.
+
+  - **`anyPcLoading() → boolean`** *(wrapped in `useCallback` with `[loadingPcs]` deps)*
+    Helper that returns `true` if `loadingPcs.size > 0`. Used by components to show a global "checking health" banner.
+
+  - **Auto-check removed** — the former `useEffect` with `mountedRef` that called `checkAll()` on mount (effectively a no-op) has been deleted. A comment placeholder (`/* AUTO-CHECK REMOVED: App.jsx handles initial health check instead. */`) remains at line 74 for documentation purposes.
 
 ---
 
@@ -425,3 +431,22 @@ Mutation hook for deleting a user account. Follows the same pattern as `useDelet
   - Auto-fetches user list on mount via `useEffect`; refetch is exposed via the stable `fetchUsersList` callback.
   - Intended for Admin Panel components that display and manage registered users.
 - **Updated** general description: now mentions `useUsers` alongside `usePcs` and `useServices` as list-fetching hooks with shared monotonic counter pattern.
+
+### useServiceHealth.js rewrite (2026-07-13)
+- **Complete rewrite** of `useServiceHealth.js`:
+  - **Removed** the monotonic request counter (`requestCounter` ref) and the global `loading` boolean. No longer uses stale-response discarding via counter comparison.
+  - **Removed** import of `checkAllHealth` from `../services/healthApi.js`. Only `checkPcHealth` is now imported.
+  - **Added** `Set`-based per-pcId loading tracking: `loadingPcs` state is a `Set` of pcIds currently being checked, replacing the single `loading: boolean`.
+  - **Added** `isPcLoading(pcId) → boolean` helper: returns `loadingPcs.has(pcId)`, enabling per-server loading spinners in components.
+  - **Added** `anyPcLoading() → boolean` helper: returns `loadingPcs.size > 0`, enabling a global "checking health" indicator.
+  - **Changed** `checkSinglePc(pcId)` to manage loading via Set operations: adds `pcId` on call start, removes it on error or success (both paths delete from Set).
+  - **Changed** `checkAll(pcIds)` signature: now accepts an `Array<string>` of pcIds and iterates individually, firing `checkSinglePc(id)` for each via `Promise.allSettled`. Returns early if `pcIds` is not a valid non-empty array. Dependency array is `[checkSinglePc]` (was `[]`).
+  - **Changed** return object: now returns `{ statuses, isPcLoading, anyPcLoading, checkSinglePc, checkAll }` instead of `{ statuses, loading, checkSinglePc, checkAll }`.
+  - **Auto-check on mount** still present but effectively does nothing: `checkAll()` is called without arguments, and since `checkAll` guards `!Array.isArray(pcIds)`, no health checks fire automatically on mount. The StrictMode guard (`mountedRef`) remains in place.
+
+### useServiceHealth.js — auto-check removed (2026-07-13)
+- **Removed** the auto-check `useEffect` and `mountedRef` that were deprecated (the effect was a no-op since `checkAll()` was called with no arguments, which caused an early return).
+- **Removed** unused imports: `useEffect` and `useRef` are no longer imported from `react`. Only `useState` and `useCallback` remain.
+- **Updated** JSDoc: now clarifies that auto-check is coordinated from `App.jsx` (using a one-time ref guard), not from within the hook itself.
+- **Added** a comment placeholder at line 74 (`/* AUTO-CHECK REMOVED: App.jsx handles initial health check instead. */`) for future reference.
+- **Per-PC loading via Set-based tracking** remains intact and unchanged from the previous refactor — `loadingPcs`, `isPcLoading()`, and `anyPcLoading()` are unaffected.
