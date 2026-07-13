@@ -32,7 +32,7 @@ function PCGrid({ pcs, loading, isAdmin, onEditPc, onAddService, onDeletePc, onE
               onEditService={onEditService}
               onDeleteService={onDeleteService}
               healthStatuses={serviceHealth?.statuses}
-              healthLoading={serviceHealth?.loading}
+              isThisPcLoading={serviceHealth?.isPcLoading(pc._id)}
               onCheckPc={() => serviceHealth?.checkSinglePc(pc._id)}
             />
           ))}
