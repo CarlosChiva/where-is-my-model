@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { checkPcHealth, checkAllHealth } from '../services/healthApi.js';
+import { useState, useCallback } from 'react';
+import { checkPcHealth } from '../services/healthApi.js';
 
 /**
  * useServiceHealth — Centralized per-service TCP health status manager.
@@ -9,24 +9,15 @@ import { checkPcHealth, checkAllHealth } from '../services/healthApi.js';
  *   'down'  — service port is unreachable or errored
  *   null    — not yet checked
  *
- * Auto-charges `checkAll()` once on mount (StrictMode-safe).
+ * Auto-check is coordinated from App.jsx using a one-time ref guard.
+ * The hook itself does NOT fire an auto-check on mount.
  * Self-contained: accepts no props.
  *
- * Returns: { statuses, loading, checkSinglePc, checkAll }
+ * Returns: { statuses, isPcLoading, anyPcLoading, checkSinglePc, checkAll }
  */
 export default function useServiceHealth() {
   const [statuses, setStatuses] = useState({});
-  const [loading, setLoading] = useState(false);
-
-  /* --------------------------------------------------------------- */
-  /*  Monotonic counter — discards out-of-order / stale responses     */
-  /* --------------------------------------------------------------- */
-  const requestCounter = useRef(0);
-
-  /* --------------------------------------------------------------- */
-  /*  StrictMode guard — checkAll fires once per real page load       */
-  /* --------------------------------------------------------------- */
-  const mountedRef = useRef(false);
+  const [loadingPcs, setLoadingPcs] = useState(new Set());
 
   /* --------------------------------------------------------------- */
   /*  Internal: parse backend array into flat { key: status } map     */
@@ -45,52 +36,48 @@ export default function useServiceHealth() {
   }
 
   /* --------------------------------------------------------------- */
-  /*  checkAll — hit backend for the entire fleet                     */
-  /* --------------------------------------------------------------- */
-  const checkAll = useCallback(async () => {
-    const currentCounter = ++requestCounter.current;
-    setLoading(true);
-
-    const result = await checkAllHealth();
-    if (currentCounter !== requestCounter.current) return; // stale
-
-    if (result.error) {
-      /* keep prev statuses, clear loading */
-      setLoading(false);
-      return;
-    }
-    setStatuses((prev) => ({ ...prev, ...flattenResults(result.data) }));
-    setLoading(false);
-  }, []);
-
-  /* --------------------------------------------------------------- */
   /*  checkSinglePc — hit backend for one server                      */
   /* --------------------------------------------------------------- */
   const checkSinglePc = useCallback(async (pcId) => {
     if (!pcId) return;
-    const currentCounter = ++requestCounter.current;
-    setLoading(true);
+    setLoadingPcs(prev => new Set(prev).add(pcId));
 
     const result = await checkPcHealth(pcId);
-    if (currentCounter !== requestCounter.current) return; // stale
-
     if (result.error) {
-      /* keep prev statuses, clear loading */
-      setLoading(false);
+      setLoadingPcs(prev => { const n = new Set(prev); n.delete(pcId); return n; });
       return;
     }
-    setStatuses((prev) => ({ ...prev, ...flattenResults([result.data]) }));
-    setLoading(false);
+    setStatuses(prev => ({ ...prev, ...flattenResults([result.data]) }));
+    setLoadingPcs(prev => { const n = new Set(prev); n.delete(pcId); return n; });
   }, []);
 
   /* --------------------------------------------------------------- */
-  /*  Auto-check on initial mount (StrictMode-safe)                   */
+  /*  checkAll — iterates pcIds individually                          */
   /* --------------------------------------------------------------- */
-  useEffect(() => {
-    if (mountedRef.current) return;
-    mountedRef.current = true;
-    checkAll();
-  }, [checkAll]);
+  const checkAll = useCallback(async (pcIds) => {
+    if (!Array.isArray(pcIds) || pcIds.length === 0) return;
+    // Fire all concurrently
+    const promises = pcIds.map(id => checkSinglePc(id));
+    return Promise.allSettled(promises);
+  }, [checkSinglePc]);
 
-  return { statuses, loading, checkSinglePc, checkAll };
+  /* --------------------------------------------------------------- */
+  /*  Helper: is a specific PC currently loading?                     */
+  /* --------------------------------------------------------------- */
+  const isPcLoading = useCallback((pcId) => loadingPcs.has(pcId), [loadingPcs]);
+
+  /* --------------------------------------------------------------- */
+  /*  Helper: is ANY PC currently loading?                            */
+  /* --------------------------------------------------------------- */
+  const anyPcLoading = useCallback(() => loadingPcs.size > 0, [loadingPcs]);
+
+  /* AUTO-CHECK REMOVED: App.jsx handles initial health check instead. */
+
+  return {
+    statuses,
+    isPcLoading,
+    anyPcLoading,
+    checkSinglePc,
+    checkAll
+  };
 }

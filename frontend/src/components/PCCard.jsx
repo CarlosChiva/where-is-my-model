@@ -12,7 +12,7 @@
  *   onAddService— ({ pcId, gpus, servicios }) => void  Called when Add Service is clicked
  *   onDeletePp  — ({ pcId, nombre }) => void  Called when Delete PC is clicked
  *   healthStatuses — Object keyed by "pcId---serviceIndex" with values 'up'|'down'|null
- *   healthLoading  — Boolean indicating whether a health check is in flight
+ *   isThisPcLoading — Boolean indicating whether this specific PC is loading its health check
  *   onCheckPc    — () => Promise<void>  Called when per-PC health check is requested
  */
 import ServiceRow from './ServiceRow';
@@ -21,7 +21,7 @@ import { computeGpuUsage } from '../utils/gpuHelpers.js';
 
 export default function PCCard({
   pc, index, isAdmin, onEditPc, onAddService, onDeletePc, onEditService, onDeleteService,
-  healthStatuses = {}, healthLoading = false, onCheckPc
+  healthStatuses = {}, isThisPcLoading = false, onCheckPc
 }) {
   const services = pc?.servicios ?? [];
   const gpus     = pc?.gpus ?? [];
@@ -118,26 +118,27 @@ export default function PCCard({
           className="border border-text-secondary text-text-secondary p-2 rounded-md hover:bg-bg-input transition-colors disabled:opacity-50"
           aria-label={`Check services on ${pc?.nombre ?? ''}`}
           title="Check Services"
-          disabled={healthLoading}
+          disabled={isThisPcLoading}
           onClick={() => onCheckPc?.()}
         >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className={healthLoading ? 'animate-spin' : ''}
-          >
+          <span className={isThisPcLoading ? 'animate-spin' : ''}>
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
             <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
             <path d="M3 3v5h5" />
             <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
             <path d="M16 16h5v5" />
           </svg>
+          </span>
         </button>
       </div>
     </div>

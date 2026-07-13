@@ -1,7 +1,7 @@
 # Components
 
 > Path: `frontend/src/components`
-> Last updated: 2026-07-12 (T8 revision)
+> Last updated: 2026-07-13 (T9 revision — per-card health loading)
 > Type: Composite folder
 
 This folder is the primary UI assembly layer of the "Where Is My Model" React frontend. It contains all presentational and interactive components used across three distinct application areas: a **server/service dashboard** (Header, PCGrid, PCCard, ServiceRow, GPUBar, GPUDetails), an independent **GPU VRAM calculator** workspace (GpuCalculator subfolder), and a standalone **authentication page** (LoginPage). Modal dialogs for CRUD operations live in the Modals subfolder. Direct files provide building-block components consumed by pages or other wrappers; subfolders encapsulate self-contained feature modules.
@@ -94,7 +94,7 @@ Application header component that sits at the top of the page layout. Displays t
 
 ### 📄 PCCard.jsx
 
-Dashboard card representing a single GPU server. Displays the server name, IP badge, running service count, individual service rows (via `ServiceRow`), per-GPU usage bars (via `GPUDetails`), and three action buttons (Edit PC, Add Service, Delete PC). Computes GPU usage state from raw `gpus[]` and `servicios[]` arrays using `computeGpuUsage`.
+Dashboard card representing a single GPU server. Displays the server name, IP badge, running service count, individual service rows (via `ServiceRow`), per-GPU usage bars (via `GPUDetails`), and action buttons (Edit PC, Add Service, Delete PC, Check Services). Computes GPU usage state from raw `gpus[]` and `servicios[]` arrays using `computeGpuUsage`. **Health check is per-card**: uses `isThisPcLoading` (a per-card boolean) to spin the refresh icon and disable the check button independently of other cards.
 
 #### Imports and dependencies
 
@@ -106,21 +106,25 @@ Dashboard card representing a single GPU server. Displays the server name, IP ba
 
 #### Functions
 
-- **`PCCard(pc: { _id, nombre, ip, gpus?, servicios? }, index: number, onEditPc: (pc) => void, onAddService: ({ pcId, gpus, servicios }) => void, onDeletePc: ({ pcId, nombre }) => void, onEditService: (payload) => void, onDeleteService: ({ pcId, index }) => void) → JSX.Element`** *(default export)*
-  Renders a styled card with stagger enter animation (`animationDelay: ${index * 100}ms`). Computes GPU occupancy from the server's raw data, resolves each service to its assigned GPU for display context passed to `ServiceRow`, and wires Edit/Add/Delete callbacks through to parent handlers.
+- **`PCCard(pc: { _id, nombre, ip, gpus?, servicios? }, index: number, isAdmin: boolean, onEditPc: (pc) => void, onAddService: ({ pcId, gpus, servicios }) => void, onDeletePc: ({ pcId, nombre }) => void, onEditService: (payload) => void, onDeleteService: ({ pcId, index }) => void, healthStatuses: Record<string, string>|Object = {}, isThisPcLoading: boolean = false, onCheckPc?: () => Promise<void>) → JSX.Element`** *(default export)*
+  Renders a styled card with stagger enter animation (`animationDelay: ${index * 100}ms`). Computes GPU occupancy from the server's raw data, resolves each service to its assigned GPU for display context passed to `ServiceRow`, and wires Edit/Add/Delete callbacks through to parent handlers. Includes a "Check Services" button with a refresh-icon SVG that spins (via `animate-spin` on a `<span>` wrapper) and the button becomes disabled when `isThisPcLoading` is `true` — **this loading state is per-card, not global**.
   - `pc`: Server document containing `_id`, `nombre`, `ip`, `gpus[]`, `servicios[]`. All fields are null-safe (`??` guards).
   - `index`: Numeric index for stagger animation delay (100 ms increment per card).
+  - `isAdmin`: Boolean flag that gates visibility of Edit PC, Add Service, and Delete PC buttons.
   - `onEditPc`: Callback receiving the full `pc` object when "Edit PC" is clicked.
   - `onAddService`: Callback receiving `{ pcId, gpus, servicios }` when "Add Service" is clicked.
   - `onDeletePc`: Callback receiving `{ pcId, nombre }` when "Delete PC" is clicked.
   - `onEditService`: Callback invoked by each `ServiceRow` with the edit payload enriched with `service`, `gpus`, and `services`.
   - `onDeleteService`: Callback passed through to `ServiceRow` for service deletion.
+  - `healthStatuses`: Object keyed by `"${pcId}---${serviceIndex}"` with values `'up' | 'down' | null`. Passed through to each `ServiceRow` for per-service status display. Defaults to `{}`.
+  - `isThisPcLoading`: Boolean indicating whether this specific PC is currently undergoing a health check. When true, the "Check Services" button is disabled (`disabled={isThisPcLoading}`) and the refresh icon SVG receives the `animate-spin` Tailwind class. Defaults to `false`. **Replaces the previous global `healthLoading` prop** — each card now tracks its own loading state independently.
+  - `onCheckPc`: Optional callback invoked when the "Check Services" button is clicked. Called via optional chaining (`onCheckPc?.()`) so absence of the callback does not cause errors. When provided, it should trigger a single-server health probe (typically `serviceHealth.checkSinglePc(pc._id)` from the parent).
 
 ---
 
 ### 📄 PCGrid.jsx
 
-Responsive grid layout that renders a collection of `PCCard` instances for all configured servers. Handles three states: loading spinner, empty-state prompt with call-to-action, and the populated grid (1 / 2 / 3 columns across breakpoints). Passes all action callbacks through to each card.
+Responsive grid layout that renders a collection of `PCCard` instances for all configured servers. Handles three states: loading spinner, empty-state prompt with call-to-action, and the populated grid (1 / 2 / 3 columns across breakpoints). Passes all action callbacks and per-card health-check props through to each card. **Health loading is per-card**: instead of a global loading flag, PCGrid resolves `isThisPcLoading` per PC via `serviceHealth?.isPcLoading(pc._id)`.
 
 #### Imports and dependencies
 
@@ -130,17 +134,18 @@ Responsive grid layout that renders a collection of `PCCard` instances for all c
 
 #### Functions
 
-- **`PCGrid(pcs: Array, loading: boolean, onEditPc: (pc) => void, onAddService: ({ pcId, gpus, servicios }) => void, onDeletePc: ({ pcId, nombre }) => void, onEditService: (payload) => void, onDeleteService: ({ pcId, index }) => void, serviceHealth: Object) → JSX.Element`** *(default export)*
+- **`PCGrid(pcs: Array, loading: boolean, isAdmin: boolean, onEditPc: (pc) => void, onAddService: ({ pcId, gpus, servicios }) => void, onDeletePc: ({ pcId, nombre }) => void, onEditService: (payload) => void, onDeleteService: ({ pcId, index }) => void, serviceHealth: Object) → JSX.Element`** *(default export)*
   Renders a responsive CSS grid section with three mutually exclusive states gated by `loading` and `pcs.length`:
   (1) loading spinner with pulsing "Loading servers..." text spanning all columns;
-   (2) empty-state card reading "No servers configured yet." / "Use the + button to add your first server.";
+  (2) empty-state card reading "No servers configured yet." / "Use the + button to add your first server.";
   (3) the full card list via `pcs.map()`. Wires through all six action callbacks plus three health-related props to each `PCCard` instance, keyed by `pc._id`.
   - `pcs`: Full array of server documents.
   - `loading`: Boolean controlling the spinner overlay state. When truthy, blocks rendering of empty or populated content via short-circuit logic.
+  - `isAdmin`: Boolean flag passed through to each `<PCCard>` for admin-gated buttons.
   - `onEditPc`, `onAddService`, `onDeletePc`, `onEditService`, `onDeleteService`: All action callbacks passed down to each `PCCard` instance verbatim.
   - `serviceHealth`: Optional health-context object providing per-PC service-health data. Uses optional chaining (`?.`) on all derived props for safe fallback when the object is absent. Forwards three properties:
     - `healthStatuses={serviceHealth?.statuses}` — current health status map for all PCs.
-    - `healthLoading={serviceHealth?.loading}` — boolean flag indicating whether a health check is in flight.
+    - `isThisPcLoading={serviceHealth?.isPcLoading(pc._id)}` — **per-card loading boolean** (replaces previous global `healthLoading={serviceHealth?.loading}`). Calls `isPcLoading()` with the specific PC's `_id` so each card independently knows whether its own health check is in flight.
     - `onCheckPc={() => serviceHealth?.checkSinglePc(pc._id)}` — zero-arg callback bound to the specific PC's `_id`, triggering a single-server health probe.
 
 ---
@@ -283,10 +288,14 @@ The parent App wraps the dashboard layout shown above. When an action callback f
 - **Corrected** architecture diagram: replaced "Export JSON → Blob download" annotation with accurate description ("Add PC button (dashboard-only)").
 -    **Updated** `PCGrid.jsx` documentation to precisely describe the current empty-state copy ("No servers configured yet." / "Use the + button to add your first server.") and three-way conditional rendering logic.
 
-### Health passthrough — PCGrid.jsx forwards service-health context
-- **Updated** `PCGrid.jsx` signature: added `serviceHealth` to destructured parameters (line 3). This object is supplied by the parent App-level health-check hook.
-- **Three new props forwarded per `<PCCard>`**:
+### Health passthrough — PCGrid.jsx forwards service-health context (legacy, superseded by T9)
+- **Original (T8)**: `PCGrid.jsx` added `serviceHealth` to destructured parameters. Three props were forwarded per `<PCCard>`:
   - `healthStatuses={serviceHealth?.statuses}` — map of health statuses keyed by PC ID.
-  - `healthLoading={serviceHealth?.loading}` — global loading flag for in-flight bulk health checks.
+  - `healthLoading={serviceHealth?.loading}` — **global** loading flag for in-flight bulk health checks. *(Superseded by `isThisPcLoading` in T9.)*
   - `onCheckPc={() => serviceHealth?.checkSinglePc(pc._id)}` — per-PC bound callback for on-demand single-server health probes.
 - All three use optional chaining (`?.`) so the component renders safely when the hook has not yet initialized or the prop is omitted. No breaking change.
+
+### Per-card health loading — T9 (2026-07-13)
+- **PCCard.jsx**: Replaced global `healthLoading` prop with `isThisPcLoading` (per-card boolean). Default is `false`. When true, the "Check Services" button is disabled (`disabled={isThisPcLoading}`) and the refresh-icon SVG is wrapped in a `<span className={isThisPcLoading ? 'animate-spin' : ''}>` for per-card spinning animation. Added optional `onCheckPc` callback (invoke guarded with `onCheckPc?.()`).
+- **PCGrid.jsx**: Changed `healthLoading={serviceHealth?.loading}` → `isThisPcLoading={serviceHealth?.isPcLoading(pc._id)}`. Previously every card shared the same loading state (all spinners animated simultaneously during a bulk check). Now each card independently tracks its own loading state via the `isPcLoading(pcId)` method from the service health context. This allows concurrent per-card health checks without cross-card spinner interference.
+- **Architecture impact**: The parent health-check hook exposes an `isPcLoading(id)` method (in addition to the existing `loading` global flag). Each `PCGrid` → `PCCard` chain now queries this method with the specific `pc._id`, enabling granular per-server loading semantics.

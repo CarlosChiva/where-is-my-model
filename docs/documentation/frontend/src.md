@@ -1,7 +1,7 @@
 # `src`
 
 > Path: `frontend/src/`
-> Last updated: 2026-07-12
+> Last updated: 2026-07-13
 > Type: Composite folder
 
 React source files for the GPU Infrastructure Dashboard frontend application, scaffolded with Vite. Contains the application entry point, root component, Tailwind CSS base imports, a React Context layer (`context/`) for global authentication state management, a REST API client layer (`services/`), a general-purpose utility module (`utils/`) providing slugification, GPU colour helpers, and form validators. Business logic components are added in subsequent tasks.
@@ -24,20 +24,19 @@ React source files for the GPU Infrastructure Dashboard frontend application, sc
 
 ## 📄 `App.jsx`
 
-Root React component of the GPU Infrastructure Dashboard. Orchestrates the full application: enforces authentication at the top level (loading guard while auth resolves, unauthenticated redirect to `<LoginPage />`). All React hooks — `useAuth`, `usePcs`, six mutation hooks, `useServiceHealth`, and both `useState` calls — fire unconditionally at the top of the component **before** any early returns, in strict compliance with React's Rules of Hooks (fixed: previously `usePcs()` and mutation hooks invoked only "behind auth gates", causing "order of Hooks changed" errors between renders). A service health check hook (`useServiceHealth`) for per-service TCP status monitoring. A post-auth refetch effect (`useEffect`) automatically reloads the master PC list and probes all service health statuses when authentication resolves successfully — ensuring the dashboard is fully populated after login without requiring a manual refresh (F5). Manages modal routing via a single state object, renders two floating action buttons ("Refresh Health" and "Add PC") on the dashboard view, and uses a three-way page router to conditionally render the **dashboard** (PC card grid + modals), **admin** (`<AdminPanel />`, self-contained user management), or **calculator** (`<GPUCalculatorPage />`). Eight CRUD handlers are role-gated (admin-only) — non-admin users receive silent no-op functions that prevent destructive operations without generating 401 errors. Each mutation hook is wired to `refetch` the master PC list on success. The `<AdminPanel>` component is fully self-contained — no hooks or callbacks were lifted into `App.jsx` for it.
+Root React component of the GPU Infrastructure Dashboard. Orchestrates the full application: enforces authentication at the top level (loading guard while auth resolves, unauthenticated redirect to `<LoginPage />`). All React hooks — `useAuth`, `usePcs`, six mutation hooks, `useServiceHealth`, and both `useState` calls — fire unconditionally at the top of the component **before** any early returns, in strict compliance with React's Rules of Hooks (fixed: previously `usePcs()` and mutation hooks invoked only "behind auth gates", causing "order of Hooks changed" errors between renders). A service health check hook (`useServiceHealth`) for per-service TCP status monitoring with per-PC loading tracking. Two separate `useEffect` hooks coordinate post-login data loading: **(1) a post-auth refetch effect** reloads the master PC list when authentication state changes (dependencies: `[isAuthenticated, isLoading, refetch]`); **(2) an initial health check effect** runs once after PCs load, guarded by a `useRef(false)` flag (`healthCheckedRef`) to prevent infinite re-firing (dependencies: `[isAuthenticated, pcs, serviceHealth]`). Manages modal routing via a single state object, renders two floating action buttons ("Refresh Health" and "Add PC") on the dashboard view. The "Refresh Health" FAB passes `pcs.map(pc => pc._id)` to `checkAll()` and uses `serviceHealth.anyPcLoading()` (boolean helper) for the spinner animation — replacing the legacy flat `serviceHealth.loading` boolean. Uses a three-way page router to conditionally render the **dashboard** (PC card grid + modals), **admin** (`<AdminPanel />`, self-contained user management), or **calculator** (`<GPUCalculatorPage />`). Eight CRUD handlers are role-gated (admin-only) — non-admin users receive silent no-op functions that prevent destructive operations without generating 401 errors. Each mutation hook is wired to `refetch` the master PC list on success. The `<AdminPanel>` component is fully self-contained — no hooks or callbacks were lifted into `App.jsx` for it.
 
 ### Imports and dependencies
 
 | Module | Imported elements | Type |
 |--------|-------------------|------|
-| `react` | `useState`, `useEffect` | External |
+| `react` | `useState`, `useEffect`, `useRef` | External |
 | `./context/AuthContext.jsx` | `useAuth` | Internal |
 | `./components/LoginPage.jsx` | `LoginPage` | Internal |
 | `./hooks/usePcs.js` | `usePcs` | Internal |
 | `./hooks/useCreatePc.js` | `useCreatePc` | Internal |
 | `./hooks/useUpdatePc.js` | `useUpdatePc` | Internal |
 | `./hooks/useDeletePc.js` | `useDeletePc` | Internal |
-| `./hooks/useServices.js` | `useServices` | Internal |
 | `./hooks/useCreateService.js` | `useCreateService` | Internal |
 | `./hooks/useUpdateService.js` | `useUpdateService` | Internal |
 | `./hooks/useDeleteService.js` | `useDeleteService` | Internal |
@@ -61,7 +60,8 @@ Root React component of the GPU Infrastructure Dashboard. Orchestrates the full 
 | `usePcs` | `{ data: pcs, loading, refetch }` | — | Master PC list hook — fetches the full fleet of GPU servers, exposes `pcs` (array), `loading` (boolean), and `refetch` (stable callback for manual re-fetching). Auto-fetches on mount when a token is present in `localStorage`. Used by the post-auth refetch effect (see below) to reload data after login. |
 | `useState` | `modalState` | `{ type: null, payload: null }` | Modal router — `type` determines which modal renders, `payload` carries data forwarded to it. |
 | `useState` | `currentPage` | `'dashboard'` | Page router — switches between `'dashboard'` (default), `'admin'`, and `'calculator'` views. Changing pages also closes any open modal via `handlePageChange`. Both FAB buttons are scoped to the dashboard only (`{ currentPage === 'dashboard' && ... }`). The "Add PC" FAB additionally requires `isAdmin` to be truthy. |
-| `useServiceHealth` | `serviceHealth` | — | Health check hook instance exposing `loading` (boolean), `checkAll()` (triggers TCP probes for all services across all PCs). Passed as `serviceHealth` prop to `<PCGrid>` and wired to the "Refresh Health" FAB button via `onClick={() => serviceHealth.checkAll()}`. Also consumed by the post-auth refetch effect to trigger a full fleet health probe after login. |
+| `useServiceHealth` | `serviceHealth` | — | Health check hook instance that tracks per-PC loading state via a `Set<string>` internally. Exposes: `statuses` (flat map of service health states), `loadingPcs` (set of PC IDs currently being probed), `isPcLoading(pcId)` (is a specific PC loading?), `anyPcLoading()` (is any PC loading?, returns boolean), `checkSinglePc(pcId)` (probe one PC), and `checkAll(pcIds)` (fire concurrent probes for the given PC ID list). Passed as `serviceHealth` prop to `<PCGrid>`. Wired to the "Refresh Health" FAB via `onClick={() => serviceHealth.checkAll(pcs.map(pc => pc._id))}`. Spinner uses `serviceHealth.anyPcLoading()` to determine if the refresh icon should animate. Also consumed by the initial health check effect which passes `pcs.map(pc => pc._id)` to `checkAll()` after PCs load. |
+| `useRef` | `healthCheckedRef` | `false` | One-time guard for the initial health check effect. Prevents `checkAll()` from running repeatedly whenever `pcs` or `serviceHealth` change. Set to `true` after the first successful health probe, causing all subsequent effect invocations to short-circuit via `if (healthCheckedRef.current) return`. |
 
 ### Callback handlers
 
@@ -104,16 +104,46 @@ Root React component of the GPU Infrastructure Dashboard. Orchestrates the full 
 - **`handleConfirmDelete() → Promise<void>` ⭐ Role-gated**
   Admin: confirmation handler for delete modals. Dispatches based on `modalState.payload.actionType`: `'pc'` calls `deletePcHook.mutate(pcId)`, `'service'` calls `deleteServiceHook.mutate({ pcId, index })`. Awaits the mutation result and only closes the modal on success (`if (!result?.error) { closeModal(); }`). On error, the modal stays open and the `DeleteConfirmModal` displays the API error banner. Non-admin: silent no-op `() => {}`.
 
-### Post-auth refetch effect (new `useEffect`)
+### Effects (two separate `useEffect` hooks — infinite loop fix)
 
-A `useEffect` hook listens to changes in both `isAuthenticated` and `isLoading`. When authentication resolves successfully — i.e., `isAuthenticated` becomes `true` and `isLoading` becomes `false` — it fires two actions:
+The previous single `useEffect` that combined PC refetching and health checking triggered an infinite loop: the health check's `checkAll()` call would trigger a state update, which caused the effect to re-run (since `pcs` and `serviceHealth` were in the dependency array), which called `checkAll()` again, creating an unending cycle. The fix splits the logic into two independently-gated effects.
 
-1. **`refetch()`** — re-fetches the master PC list from the backend via the `usePcs()` hook's stable callback (ensures fresh data after login).
-2. **`serviceHealth.checkAll()`** — triggers a full fleet health probe across all services on all PCs.
+#### **Effect 1 — Post-auth refetch** _(lines 51–55)_
 
-**Dependency array:** `[isAuthenticated, isLoading, refetch, serviceHealth.checkAll]`. Both `refetch` and `serviceHealth.checkAll` are stable references (wrapped in `useCallback` internally within their respective hooks), so this effect fires only when the auth state transitions (initial login or explicit logout followed by re-authentication).
+Refetches the master PC list when authentication state changes.
 
-> **Purpose:** Before this effect, a successful login transitioned from `<LoginPage />` to the dashboard via React's declarative rendering (no page reload). However, `usePcs()` only auto-fetches on mount if a token is present in `localStorage`. During a fresh login session (where the token was written *by* the login flow, not pre-existing), the dashboard could render with stale or empty data until the user manually clicked "Refresh Health" or navigated away and back. This effect ensures that every time authentication completes, the master PC list is re-fetched and all service health statuses are probed — providing a fully populated dashboard immediately after login without requiring F5.
+```js
+if (isAuthenticated && !isLoading) { refetch(); }
+```
+
+- **Condition**: `isAuthenticated` is `true` AND `isLoading` is `false`.
+- **Action**: Calls `refetch()` from `usePcs()` to reload the fleet list from the backend.
+- **Dependency array:** `[isAuthenticated, isLoading, refetch]` — tightly coupled to auth state only; does **not** depend on `pcs`, `serviceHealth`, or any data that mutates as a side effect.
+- **Purpose**: When a user logs in, the token is written but `usePcs()` has already mounted (React Rules of Hooks require unconditional hook calls). This effect ensures fresh data is loaded immediately after the auth transition.
+
+#### **Effect 2 — Initial health check** _(lines 58–68)_
+
+Runs a one-time health probe across all loaded PCs after the initial data load.
+
+```js
+const healthCheckedRef = useRef(false);
+
+if (healthCheckedRef.current) return;
+if (!isAuthenticated || pcs.length === 0) return;
+healthCheckedRef.current = true;
+if (serviceHealth.checkAll) {
+  const ids = pcs.map(pc => pc._id);
+  serviceHealth.checkAll(ids);
+}
+```
+
+- **Guard 1**: `if (healthCheckedRef.current) return` — after the first successful run, every subsequent re-render short-circuits immediately. This prevents the infinite loop that occurred when effect dependencies changed.
+- **Guard 2**: `if (!isAuthenticated || pcs.length === 0) return` — does nothing until the user is authenticated and the PC list is populated.
+- **Action**: Calls `serviceHealth.checkAll(ids)` where `ids = pcs.map(pc => pc._id)` — fires concurrent health probes for each loaded PC.
+- **Dependency array:** `[isAuthenticated, pcs, serviceHealth]` — reacts to auth state, PC list changes, and health hook reinitialization. The `useRef` guard ensures that even though these dependencies change frequently, `checkAll()` executes only once.
+- **Purpose**: Probes service health on first dashboard load without repeating on every subsequent PC list update or service state change.
+
+> **Bug (infinite loop):** When `checkAll()` was called from within the same effect that tracked `pcs` or `serviceHealth` in its dependency array, the health state mutation from `checkAll()` triggered a re-render, which re-ran the effect → called `checkAll()` again → infinite cycle. The `useRef(false)` pattern breaks this cycle by making the health check a **one-time operation**: it fires once and never again, regardless of dependency changes. The refetch effect, which only depends on auth flags, cannot cause a similar loop because `refetch()` itself does not mutate `isAuthenticated` or `isLoading`.
 
 ### Auth guards (early returns before main render)
 
@@ -130,8 +160,8 @@ The component renders (only reached after both auth guards pass):
 1. **`Header`** — server count summary, "Add PC" button, and "Export JSON" button (which internally serializes `pcs` to a timestamped JSON file download via native browser APIs).
 2. **`PCGrid`** — responsive grid of PC cards with editing, add-service, and delete actions. Receives `serviceHealth={serviceHealth}` for per-service TCP status display within each card. Receives `isAdmin={isAdmin}` to gate admin-only action buttons inside the grid (hides edit/delete/add-service UI from non-admin users entirely).
 3. **FAB buttons** (dashboard-only):
-   * **"Refresh Health"** — positioned at `bottom-[6.5rem] right-6` (above the "Add PC" FAB). Calls `serviceHealth.checkAll()` on click. Icon (refresh/circular arrows SVG) gets a conditional `animate-spin` class when `serviceHealth.loading` is truthy, providing visual feedback during health probes. Same styling as the existing "Add PC" FAB: `w-12 h-12 md:w-14 md:h-14`, rounded, accent-coloured, with shadow and hover/active transitions.
-   * **"Add PC"** — positioned at `bottom-6 right-6`. Conditional render guard is `currentPage === 'dashboard' && isAdmin` (dual-gated: dashboard page AND admin role). Calls `handleOpenAddPc` on click which opens the AddPcModal. Non-admin users never see this button at all — it is conditionally rendered out entirely when `isAdmin` is falsy.
+    * **"Refresh Health"** — positioned at `bottom-[6.5rem] right-6` (above the "Add PC" FAB). Calls `serviceHealth.checkAll(pcs.map(pc => pc._id))` on click, passing the current PC ID array so the hook fires concurrent `checkSinglePc(id)` calls for each loaded server. The wrapper SVG `<span>` gets a conditional `animate-spin` class when `serviceHealth.anyPcLoading()` returns `true` (i.e., at least one PC is being probed), providing visual feedback during health checks. Same styling as the existing "Add PC" FAB: `w-12 h-12 md:w-14 md:h-14`, rounded, accent-coloured, with shadow and hover/active transitions.
+    * **"Add PC"** — positioned at `bottom-6 right-6`. Conditional render guard is `currentPage === 'dashboard' && isAdmin` (dual-gated: dashboard page AND admin role). Calls `handleOpenAddPc` on click which opens the AddPcModal. Non-admin users never see this button at all — it is conditionally rendered out entirely when `isAdmin` is falsy.
 3. **Modal routing** — conditionally renders one of five modals based on `modalState.type`:
    - `'addPc'` → `AddPcModal` (receives `loading`, `error`, `clearError` from `createPcHook`)
    - `'editPc'` → `EditPcModal` (receives `loading`, `error`, `clearError` from `updatePcHook`)
@@ -294,3 +324,26 @@ Global stylesheet that activates Tailwind CSS's three-layer directive system. Se
 - **Behavioral impact:** The two auth guards still prevent dashboard JSX from rendering during loading/unauthenticated states. However, `usePcs()` and mutation hooks now execute regardless — their internal logic handles these states gracefully (e.g., `usePcs` always fetches on mount; mutations are guarded by the ternary role pattern). No functional regressions introduced.
 - **Updated** file-level description of `App.jsx`: added emphasis on unconditional hook execution, clarified that auth guards block rendering but not hook invocation.
 - **Updated** "Auth guards (early returns before main render)" section: rewritten to document that guards now execute *after* all hooks have fired, with a dedicated T017 fix callout explaining the violation and resolution.
+
+### Health check system — per-PC loading tracking and explicit PC-ID targeting in App.jsx
+- **Updated** `App.jsx` description: now mentions the health check system uses per-PC loading tracking (`loadingPcs` set) rather than a single boolean, and that the "Refresh Health" FAB and post-login effect both pass `pcs.map(pc => pc._id)` to `checkAll()` for explicit PC targeting.
+- **Updated** Internal state table (`useServiceHealth` row): replaced the flat `loading` / `checkAll()` description with the complete return shape: `statuses`, `loadingPcs` (Set), `isPcLoading(pcId)`, `anyPcLoading()`, `checkSinglePc(pcId)`, and `checkAll(pcIds)`. Documented the FAB wiring: `onClick={() => serviceHealth.checkAll(pcs.map(pc => pc._id))}` and spinner condition: `anyPcLoading()`.
+- **Updated** Post-auth refetch effect section (renamed from "new `useEffect`" to "updated `useEffect`"):
+  - `checkAll()` now called as `serviceHealth.checkAll(pcIds)` with `const ids = pcs.map(pc => pc._id)`.
+  - Added `pcs.length > 0` guard to prevent running on an empty fleet.
+  - Dependency array expanded from `[isAuthenticated, isLoading, refetch, serviceHealth.checkAll]` to `[isAuthenticated, isLoading, pcs, refetch, serviceHealth]` — the stable `checkAll` callback reference replaced with the full `serviceHealth` object, and `pcs` added so the effect tracks data changes.
+  - `checkAll` call wrapped in `if (serviceHealth.checkAll)` for defensive safety.
+- **Updated** FAB buttons documentation: "Refresh Health" button now documented as calling `serviceHealth.checkAll(pcs.map(pc => pc._id))` and using `anyPcLoading()` (boolean helper) for the spinner `animate-spin` toggle, replacing the legacy `serviceHealth.loading` boolean.
+
+### Infinite loop fix — split single useEffect into two separate effects in App.jsx
+- **Import changes in `App.jsx`:**
+  - `useRef` added to `react` import (was: `useState`, `useEffect`; now: `useState`, `useEffect`, `useRef`).
+  - `useServices` removed from imports (was imported from `./hooks/useServices.js` but unused).
+  - Updated imports table: `react` now lists `useState`, `useEffect`, `useRef`; `useServices` row removed entirely.
+- **Bug description:** The single `useEffect` combined PC refetching and health checking, with dependencies `[isAuthenticated, isLoading, pcs, refetch, serviceHealth]`. Calling `checkAll()` from within the effect mutated health-related state, which triggered a re-render, which re-ran the effect (since `pcs` and/or `serviceHealth` were in the dependency array), which called `checkAll()` again — creating an infinite re-render loop.
+- **Fix — two separate effects:**
+  - **Effect 1 (Post-auth refetch):** Only refetches the PC list when auth state changes. Dependencies: `[isAuthenticated, isLoading, refetch]` — does not depend on `pcs` or `serviceHealth`, so it cannot trigger a loop.
+  - **Effect 2 (Initial health check):** Runs `checkAll()` once, guarded by `useRef(false)` (`healthCheckedRef`). Dependencies: `[isAuthenticated, pcs, serviceHealth]`. The `useRef` flag ensures `checkAll()` executes exactly once: subsequent dependency changes cause early return.
+- **New internal state:** `healthCheckedRef = useRef(false)` — one-time guard documented in the Internal state table.
+- **Updated JSDoc comments:** Code comments rewritten to clearly label both effects (`/* ── 1. Post-auth refetch (auth-change only) ── */`, `/* ── 2. Initial health check (runs once after pcs load) ── */`).
+- **Unchanged:** FAB "Refresh Health" button continues to call `serviceHealth.checkAll(pcs.map(pc => pc._id))` on click, unaffected by the split (it's a manual user action, not an automated effect).
