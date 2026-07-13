@@ -160,11 +160,21 @@ router.post('/login', async (req, res) => {
 /*  GET /me — Return the authenticated user's profile                 */
 /* ------------------------------------------------------------------ */
 
-router.get('/me', authMiddleware, (req, res) => {
-  res.json({
-    success: true,
-    user: req.user,
-  });
-});
+router.get('/me', authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId);
 
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found.',
+      });
+    }
+
+    res.json(userProfile(user));
+  } catch (err) {
+    console.error('[auth] GET /me error:', err);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
 export default router;
