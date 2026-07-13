@@ -1,6 +1,7 @@
 import express from 'express';
 import PC from '../models/PC.js';
 import { validateServiceBody, validateServiceUpdate } from '../middleware/validation.js';
+import { authMiddleware, requireAdmin } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -20,7 +21,7 @@ function getPcId(req) {
 /*  GET / — List services for a given PC                              */
 /* ------------------------------------------------------------------ */
 
-router.get('/', async (req, res) => {
+router.get('/', authMiddleware, async (req, res) => {
   try {
     const pc = await PC.findById(getPcId(req));
     if (!pc) {
@@ -40,7 +41,7 @@ router.get('/', async (req, res) => {
 /*  POST / — Add a service to a PC                                    */
 /* ------------------------------------------------------------------ */
 
-router.post('/', validateServiceBody, async (req, res) => {
+router.post('/', authMiddleware, requireAdmin, validateServiceBody, async (req, res) => {
   try {
     const pc = await PC.findById(getPcId(req));
     console.log('[SVC POST] pc found=', !!pc, 'pc._id=', pc?._id?.toString());
@@ -77,7 +78,7 @@ router.post('/', validateServiceBody, async (req, res) => {
 /*  PUT /:serviceIndex — Update a service by its array index          */
 /* ------------------------------------------------------------------ */
 
-router.put('/:serviceIndex', validateServiceUpdate, async (req, res) => {
+router.put('/:serviceIndex', authMiddleware, requireAdmin, validateServiceUpdate, async (req, res) => {
   try {
     const pc = await PC.findById(getPcId(req));
     if (!pc) {
@@ -126,7 +127,7 @@ router.put('/:serviceIndex', validateServiceUpdate, async (req, res) => {
 /*  DELETE /:serviceIndex — Remove a service by its array index       */
 /* ------------------------------------------------------------------ */
 
-router.delete('/:serviceIndex', async (req, res) => {
+router.delete('/:serviceIndex', authMiddleware, requireAdmin, async (req, res) => {
   try {
     const pc = await PC.findById(getPcId(req));
     if (!pc) {

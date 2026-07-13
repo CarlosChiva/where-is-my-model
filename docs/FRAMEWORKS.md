@@ -28,6 +28,9 @@
 | Method | Path | Description | Status |
 |--------|------|-------------|--------|
 | `GET` | `/api/health` | Health check | ✅ |
+| `POST` | `/api/auth/register` | Register new user (1st = admin) | ✅ |
+| `POST` | `/api/auth/login` | Login → returns JWT | ✅ |
+| `GET` | `/api/auth/me` | Current user profile (JWT decoded) | ✅ |
 | `GET` | `/api/pcs` | List all PCs | ✅ |
 | `GET` | `/api/pcs/:id` | Get single PC | ✅ |
 | `POST` | `/api/pcs` | Create PC | ✅ |
@@ -39,6 +42,32 @@
 | `DELETE` | `/api/pcs/:pcId/services/:index` | Delete service | ✅ |
 | `POST` | `/api/check-health/pcs/:pcId` | Check all services health for a single PC (TCP) | 🔄 In progress |
 | `POST` | `/api/check-health/all` | Check all services health across all PCs (TCP) | 🔄 In progress |
+| `GET` | `/api/auth/users` | List all users (admin-only, no passwords) | ✅ Implemented |
+| `PUT` | `/api/auth/users/:userId/role` | Update user role (admin↔user↔pending, admin-only) | 🔄 In progress |
+| `DELETE` | `/api/auth/users/:userId` | Delete user with last-admin safeguard (admin-only) | 🔜 Planned |
+
+## Auth Infrastructure
+
+### JWT Structure
+```js
+{ userId: String, username: String, role: 'admin'|'user'|'pending' }
+```
+Signed with `JWT_SECRET`. Stored in `localStorage['token']` on frontend. Pending users never receive a JWT token.
+
+### Middleware (`backend/middleware/auth.js`)
+- **`authMiddleware`**: Verifies Bearer token, sets `req.user = decoded_payload`
+- **`requireAdmin`**: Checks `req.user.role === 'admin'`, returns 403 if not admin
+
+### Token Storage (Frontend)
+- JWT stored in `localStorage` under key `'token'`
+- `AuthContext.jsx` wraps `<App />` providing: `user`, `token`, `isAuthenticated`, `isLoading`, `login()`, `register()`, `logout()`
+- On mount: checks localStorage token → calls `GET /auth/me` to validate
+
+### Route Protection Pattern
+| Operation type | Middleware |
+|---|---|
+| Read (GET) | `authMiddleware` only |
+| Write (POST/PUT/DELETE) | `authMiddleware, requireAdmin` |
 
 ## GPU Color Thresholds
 

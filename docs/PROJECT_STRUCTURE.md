@@ -9,17 +9,20 @@ where-is-my-model/
 │   ├── .env.development              # NODE_ENV, PORT=8080, MONGODB_URI, CLIENT_URL
 │   ├── Dockerfile                    # Node 20 Alpine, single-stage
 │   ├── middleware/
-│   │   └── validation.js             # validatePcBody, validateServiceBody, validateServiceUpdate
+│   │   ├── auth.js                 # [AUTH] authMiddleware (JWT validation), requireAdmin (role check)
+│   │   └── validation.js           # validatePcBody, validateServiceBody, validateServiceUpdate
 │   ├── models/
-│   │   └── PC.js                     # Schema: {nombre, ip, vram, servicios[]}, virtual totalGpu, GPU cap validator
+│   │   ├── PC.js                  # Schema: {nombre, ip, vram, servicios[]}, virtual totalGpu, GPU cap validator
+│   │   └── User.js                # [AUTH] Schema: {username (unique), password (bcrypt), role ('admin'|'user'|'pending')}
 │   ├── routes/
-    │   │   ├── pcs.js                    # GET /, GET /:id, POST /, PUT /:id, DELETE /:id
-    │   │   ├── services.js               # GET /, POST /, PUT /:index, DELETE /:index
-    │   │   └── health.js                 # [NEW] POST /check-health/pcs/:pcId, POST /check-health/all
+    │   │   ├── auth.js            # [AUTH] POST /register, POST /login, GET /me, GET /users, PUT /users/:userId/role
+    │   │   ├── pcs.js             # GET /, GET /:id, POST /, PUT /:id, DELETE /:id (+ auth middleware)
+    │   │   ├── services.js        # GET /, POST /, PUT /:index, DELETE /:index (+ auth middleware)
+    │   │   └── health.js          # POST /check-health/pcs/:pcId, POST /check-health/all
     │   ├── services/
-    │   │   └── healthChecker.js          # [NEW] TCP connect checker (net module, ESM)
-    │   ├── seed.js                       # Manual seed from data.json
-│   ├── server.js                     # Entry: MongoDB connect, auto-seed, route registration, listen(8080)
+    │   │   └── healthChecker.js   # TCP connect checker (net module, ESM)
+    │   ├── seed.js                # Manual seed from data.json
+│   ├── server.js                 # Entry: MongoDB connect, auto-seed, route registration (+ auth routes), listen(8080)
 │   ├── package.json
 │   └── package-lock.json
 │

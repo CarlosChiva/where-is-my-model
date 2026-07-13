@@ -1,6 +1,6 @@
 import GPUBar from './GPUBar';
 
-function ServiceRow({ service, vramGb, index, pcId, onEdit, onDelete, gpuName, status }) {
+function ServiceRow({ service, vramGb, index, pcId, isAdmin, onEdit, onDelete, gpuName, status }) {
   const { nombre, puerto, gpu } = service;
 
   return (
@@ -33,51 +33,53 @@ function ServiceRow({ service, vramGb, index, pcId, onEdit, onDelete, gpuName, s
       </div>
 
       {/* ── Right: action buttons ── */}
-      <div className="flex items-center gap-1 shrink-0">
-        <button
-          type="button"
-          className="p-1.5 rounded text-text-secondary hover:text-accent transition-colors duration-200"
-          aria-label={`Edit service ${nombre}`}
-          onClick={() => onEdit({ pcId, index })}
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
+      {isAdmin && (
+        <div className="flex items-center gap-1 shrink-0">
+          <button
+            type="button"
+            className="p-1.5 rounded text-text-secondary hover:text-accent transition-colors duration-200"
+            aria-label={`Edit service ${nombre}`}
+            onClick={() => onEdit({ pcId, index })}
           >
-            <path d="M17 3a2.85 2.85 0 0 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
-            <path d="m15 5 4 4" />
-          </svg>
-        </button>
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M17 3a2.85 2.85 0 0 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+              <path d="m15 5 4 4" />
+            </svg>
+          </button>
 
-        <button
-          type="button"
-          className="p-1.5 rounded text-text-secondary hover:text-danger transition-colors duration-200"
-          aria-label={`Delete service ${nombre}`}
-          onClick={() => onDelete({ pcId, index })}
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
+          <button
+            type="button"
+            className="p-1.5 rounded text-text-secondary hover:text-danger transition-colors duration-200"
+            aria-label={`Delete service ${nombre}`}
+            onClick={() => onDelete({ pcId, index })}
           >
-            <path d="M18 6 6 18" />
-            <path d="m6 6 12 12" />
-          </svg>
-        </button>
-      </div>
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M18 6 6 18" />
+              <path d="m6 6 12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
     </div>
   );
 }

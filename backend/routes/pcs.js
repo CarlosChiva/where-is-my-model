@@ -1,6 +1,7 @@
 import express from 'express';
 import PC from '../models/PC.js';
 import { validatePcBody } from '../middleware/validation.js';
+import { authMiddleware, requireAdmin } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -8,7 +9,7 @@ const router = express.Router();
 /*  GET / — List all PCs                                              */
 /* ------------------------------------------------------------------ */
 
-router.get('/', async (req, res) => {
+router.get('/', authMiddleware, async (req, res) => {
   try {
     const pcs = await PC.find().lean();
     res.json({ success: true, data: pcs });
@@ -22,7 +23,7 @@ router.get('/', async (req, res) => {
 /*  GET /:id — Get single PC                                          */
 /* ------------------------------------------------------------------ */
 
-router.get('/:id', async (req, res) => {
+router.get('/:id', authMiddleware, async (req, res) => {
   try {
     const pc = await PC.findById(req.params.id).lean();
     if (!pc) {
@@ -42,7 +43,7 @@ router.get('/:id', async (req, res) => {
 /*  POST / — Create new PC                                            */
 /* ------------------------------------------------------------------ */
 
-router.post('/', validatePcBody, async (req, res) => {
+router.post('/', authMiddleware, requireAdmin, validatePcBody, async (req, res) => {
   try {
     const pc = new PC({
       nombre: req.body.nombre,
@@ -67,7 +68,7 @@ router.post('/', validatePcBody, async (req, res) => {
 /*  PUT /:id — Update existing PC                                     */
 /* ------------------------------------------------------------------ */
 
-router.put('/:id', validatePcBody, async (req, res) => {
+router.put('/:id', authMiddleware, requireAdmin, validatePcBody, async (req, res) => {
   try {
     const pc = await PC.findByIdAndUpdate(
       req.params.id,
@@ -100,7 +101,7 @@ router.put('/:id', validatePcBody, async (req, res) => {
 /*  DELETE /:id — Remove PC and all its services                      */
 /* ------------------------------------------------------------------ */
 
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', authMiddleware, requireAdmin, async (req, res) => {
   try {
     const pc = await PC.findByIdAndDelete(req.params.id);
 

@@ -1,10 +1,10 @@
 # Components
 
 > Path: `frontend/src/components`
-> Last updated: 2026-06-07 (revision)
+> Last updated: 2026-07-12 (T8 revision)
 > Type: Composite folder
 
-This folder is the primary UI assembly layer of the "Where Is My Model" React frontend. It contains all presentational and interactive components used across two distinct application areas: a **server/service dashboard** (Header, PCGrid, PCCard, ServiceRow, GPUBar, GPUDetails) and an independent **GPU VRAM calculator** workspace (GpuCalculator subfolder). Modal dialogs for CRUD operations live in the Modals subfolder. Direct files provide building-block components consumed by pages or other wrappers; subfolders encapsulate self-contained feature modules.
+This folder is the primary UI assembly layer of the "Where Is My Model" React frontend. It contains all presentational and interactive components used across three distinct application areas: a **server/service dashboard** (Header, PCGrid, PCCard, ServiceRow, GPUBar, GPUDetails), an independent **GPU VRAM calculator** workspace (GpuCalculator subfolder), and a standalone **authentication page** (LoginPage). Modal dialogs for CRUD operations live in the Modals subfolder. Direct files provide building-block components consumed by pages or other wrappers; subfolders encapsulate self-contained feature modules.
 
 ---
 
@@ -68,17 +68,21 @@ Application header component that sits at the top of the page layout. Displays t
 
 #### Functions
 
-- **`Header(pcs: Array, currentPage: string = 'dashboard', onPageChange: (pageId: string) => void) → JSX.Element`** *(default export)*
-  Renders the top-level header bar. Computes aggregate statistics (`serverCount`, `serviceCount`) from the `pcs` array and delegates tab-switching to the `onPageChange` callback. Contains no action buttons or modals — pure presentation.
+- **`Header(pcs: Array, currentPage: string = 'dashboard', onPageChange: (pageId: string) => void, isAdmin: boolean = false) → JSX.Element`** *(default export)*
+  Renders the top-level header bar. Computes aggregate statistics (`serverCount`, `serviceCount`) from the `pcs` array and delegates tab-switching to the `onPageChange` callback. Conditionally renders an "Admin" tab when `isAdmin` is `true`. Contains no action buttons or modals — pure presentation.
   - `pcs`: Full array of server objects; used to compute `{serverCount, serviceCount}` statistics. The service count safely handles missing or non-array `servicios` via `Array.isArray()` guard.
-  - `currentPage`: Current active tab identifier (`'dashboard'` or `'calculator'`). Defaults to `'dashboard'`. Controls which tab appears selected (via `aria-selected`).
+  - `currentPage`: Current active tab identifier (`'dashboard'`, `'calculator'`, or `'admin'`). Defaults to `'dashboard'`. Controls which tab appears selected (via `aria-selected`).
   - `onPageChange`: Callback to switch between tabs; receives the target tab ID string. Guarded with truthy check before invocation (`onPageChange && onPageChange(tab.id)`).
+  - `isAdmin`: Boolean flag that conditionally appends an Admin tab to the navigation. Defaults to `false`. When `true`, a third tab `{ id: 'admin', label: 'Admin' }` is spread into the tabs array, enabling admin users to navigate to `<AdminPanel />`.
 
   **Tab configuration (local constant):**
-  | id | label | Tailwind active styling | Tailwind inactive styling |
-  |----|-------|------------------------|--------------------------|
-  | `dashboard` | Dashboard | `bg-accent text-bg-primary` | `bg-bg-input text-text-secondary hover:text-text-primary` |
-  | `calculator` | Calculadora GPU | `bg-accent text-bg-primary` | `bg-bg-input text-text-secondary hover:text-text-primary` |
+  | id | label | Tailwind active styling | Tailwind inactive styling | Notes |
+  |----|-------|------------------------|--------------------------|-------|
+  | `dashboard` | Dashboard | `bg-accent text-bg-primary` | `bg-bg-input text-text-secondary hover:text-text-primary` | Always rendered |
+  | `calculator` | Model Calculator | `bg-accent text-bg-primary` | `bg-bg-input text-text-secondary hover:text-text-primary` | Always rendered |
+  | `admin` | Admin | `bg-accent text-bg-primary` | `bg-bg-input text-text-secondary hover:text-text-primary` | Only rendered when `isAdmin === true` (via spread syntax) |
+
+  **Conditional Admin tab (T9):** The tabs array uses conditional spread — `...(isAdmin ? [{ id: 'admin', label: 'Admin' }] : [])` — to inject a third navigation option exclusively for users whose role is `'admin'`. This keeps the admin route invisible at the header level for non-admin users.
 
   **Accessibility features:**
   - Live region: server/service counter wrapped in `<span aria-live="polite">` for screen-reader announcements on data changes.
@@ -138,6 +142,39 @@ Responsive grid layout that renders a collection of `PCCard` instances for all c
     - `healthStatuses={serviceHealth?.statuses}` — current health status map for all PCs.
     - `healthLoading={serviceHealth?.loading}` — boolean flag indicating whether a health check is in flight.
     - `onCheckPc={() => serviceHealth?.checkSinglePc(pc._id)}` — zero-arg callback bound to the specific PC's `_id`, triggering a single-server health probe.
+
+---
+
+### 📄 LoginPage.jsx
+
+Full-page authentication component providing tab-based login and registration. Manages local form state (username, password, field errors, API errors, pending-approval flag) while delegating credential operations to the global `AuthContext` via `useAuth()`. Handles three post-submit outcomes: **(a)** successful auto-login redirects to dashboard; **(b)** pending-registration displays an approval-info banner; **(c)** any API error renders a danger alert. Styled with dark-theme Tailwind classes consistent with the app's design system.
+
+#### Imports and dependencies
+
+| Module | Imported elements | Type |
+|--------|-------------------|------|
+| `react` | `useState` | External |
+| `../context/AuthContext` | `useAuth` | Internal |
+
+#### Functions and internal logic
+
+- **`LoginPage() → JSX.Element`** *(default export)*
+  Renders a full-page centered card with login/register tabs. No external props — all state is internal or via AuthContext.
+
+  - `mode: 'login' | 'register'` (default `'login'`) — determines which auth action to invoke and which labels/buttons to display. Tab clicks reset all errors **and** clear the pending flag (`setRegistrationPending(false)`).
+  - `username`, `password` — controlled inputs for the credential fields.
+  - `fieldErrors: Object` — client-side validation errors keyed by field. Checked on submit (`validate()`).
+  - `apiError: String | null` — server error from `login()`/`register()`. Shown as a danger-styled alert banner above the submit button.
+  - `registrationPending: boolean` (default `false`) — set to `true` when `register()` returns `{ pending: true }` (pending-admin-approval scenario). Renders an accent-colored info banner with instructional text. Cleared on tab switch.
+
+  **`validate() → boolean`** — Synchronous check that both fields are non-empty. Sets field-level error messages; returns `true` if valid.
+
+  **`handleSubmit(e) → Promise<void>`** — Prevents default, clears API error and pending flag, validates, then calls the appropriate action (`login` or `register`) from useAuth(). Three mutually exclusive branches on response:
+    - **(1) `result.error` is truthy:** sets `apiError` → danger banner renders.
+    - **(2) `result.pending` is truthy:** sets `registrationPending = true` → accent-colored approval-info banner renders (no redirect occurs).
+    - **(3) Otherwise:** success — AuthContext flips state, triggering the authentication guard in `<App>` to swap `<LoginPage />` out for the dashboard.
+
+  **Tab switching resets all transient state:** The tab handler executes `setMode(tab); setApiError(null); setFieldErrors({}); setRegistrationPending(false);`, ensuring that no leftover error or pending message bleeds across mode changes.
 
 ---
 
@@ -225,6 +262,18 @@ The parent App wraps the dashboard layout shown above. When an action callback f
 ---
 
 ## 🔄 Changes in this update
+
+### LoginPage.jsx — Pending-registration banner and state management (T8, 2026-07-12)
+- **Updated** `LoginPage.jsx` documentation to describe the new `registrationPending` boolean state and its rendering logic.
+- **Updated** `handleSubmit()` description with a three-way branching model: (1) error → `apiError`; (2) `result.pending` → accent-colored info banner; (3) success → redirect.
+- **Added** documentation that tab switching now resets `registrationPending` alongside all other transient state (`setApiError`, `setFieldErrors`).
+- **Corrected** imports: removed stale `useEffect` import reference — only `useState` is imported from React in the current source.
+
+### LoginPage.jsx — New authentication page component (2026-07-11)
+- **Added** `LoginPage.jsx` as a new direct-file document. Full-page login/register component with tab-switching UI, controlled form inputs, client-side validation, API error display, loading spinner, and auto-redirect on successful authentication. Delegates all credential operations to `AuthContext` via `useAuth()` hook (`login`, `register`, `isLoading`, `isAuthenticated`).
+- **Updated** folder description paragraph to reference the third application area: standalone authentication page.
+
+### 2026-06-07 revision — Header.jsx correction
 
 ### 2026-06-07 revision — Header.jsx correction
 - **Removed** stale `onSave` prop and "Export JSON" button documentation from `Header.jsx`. The current source code no longer contains an Export JSON feature, Blob download logic, or the associated `handleExport()` helper.

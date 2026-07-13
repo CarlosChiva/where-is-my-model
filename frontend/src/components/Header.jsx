@@ -1,4 +1,4 @@
-function Header({ pcs, currentPage = 'dashboard', onPageChange }) {
+function Header({ pcs, currentPage = 'dashboard', onPageChange, isAdmin = false }) {
   const serverCount = pcs.length;
   const serviceCount = pcs.reduce(
     (total, pc) => total + (Array.isArray(pc.servicios) ? pc.servicios.length : 0),
@@ -8,6 +8,7 @@ function Header({ pcs, currentPage = 'dashboard', onPageChange }) {
   const tabs = [
     { id: 'dashboard', label: 'Dashboard' },
     { id: 'calculator', label: 'Model Calculator' },
+    ...(isAdmin ? [{ id: 'admin', label: 'Admin' }] : []),
   ];
 
   return (

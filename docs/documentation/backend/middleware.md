@@ -63,7 +63,34 @@ Contains request-body validation middleware functions for PC and Service routes,
   - If the parent PC is not found in the database, returns 404. If the database lookup throws, returns 500.
   - **Returns:** nothing; calls `next()` on success or returns an appropriate HTTP response (400/404/500) on failure.
 
+---
+
+## 📄 `auth.js`
+
+JWT-based authentication and authorization middleware. Provides two functions: `authMiddleware`, a generic Bearer-token verifier that decodes the JWT and attaches the payload to `req.user`; and `requireAdmin`, an optional role-gate that enforces `role === 'admin'`. Both return appropriate 4xx status codes on failure (401 for authentication errors, 403 for authorization errors). Neither function reads from or writes to MongoDB — they operate entirely on the token payload.
+
+### Imports and dependencies
+
+| Module | Imported elements | Type |
+|--------|-------------------|------|
+| `jsonwebtoken` | `jwt` (default) | External |
+
+### Functions
+
+- **`authMiddleware(req: Request, res: Response, next: NextFunction) → void | Response`**
+  Verifies a Bearer token in the `Authorization` header, decodes it, and attaches the payload to `req.user`. Returns 401 on any authentication failure. The function proceeds through three validation stages:
+  - **Header presence**: If `req.headers.authorization` is absent or falsy, returns 401 with `'Access denied. No token provided.'`
+  - **Bearer format**: Splits the header by space and verifies it has exactly two parts with the first part equal to `'Bearer'`. Returns 401 with `'Access denied. Invalid token format.'` on mismatch.
+  - **Token verification**: Calls `jwt.verify(token, process.env.JWT_SECRET)` inside a try/catch. On success, assigns `req.user = decoded` (the payload contains `userId`, `username`, and `role`) and calls `next()`. Catches three distinct error types:
+    - `jwt.JsonWebTokenError` → 401 with `'Access denied. Invalid token.'`
+    - `jwt.TokenExpiredError` → 401 with `'Access denied. Token expired.'`
+    - Any other error → 401 with `'Access denied. Token verification failed.'`
+
+- **`requireAdmin(req: Request, res: Response, next: NextFunction) → void | Response`**
+  Role-based authorization middleware intended to be chained *after* `authMiddleware`. Assumes `req.user` is already populated by upstream auth middleware. Checks that `req.user.role === 'admin'`. If the check passes, calls `next()`. Otherwise returns 403 with `'Admin access required.'`.
+
 ## 🔄 Changes in this update
 
 - **T03 — Multi-GPU architecture support in `validateServiceBody`:** The middleware was completely rewritten to validate a new `assignedGpu` field. It accepts a non-negative integer representing a valid index into the parent PC's `gpus[]` array. When omitted and the PC has exactly one GPU, it defaults to index 0. When the PC has multiple GPUs and `assignedGpu` is omitted, validation fails with an error. VRAM capacity enforcement now checks **per-GPU** limits (`pc.gpus[assignedGpu].vram`) instead of a global cap (`pc.vram`). The resolved `assignedGpu` value is stored on `req.body` for downstream route handlers to use.
 - **T04 — Multi-GPU architecture support in `validateServiceUpdate`:** The `validateServiceUpdate` function was completely rewritten to mirror the Multi-GPU capabilities of `validateServiceBody`. New behavior includes: (1) validates optional `assignedGpu` field for type (non-negative integer) and range against `pc.gpus`; (2) tracks `currentGpuIndex` from the existing service record; (3) performs per-GPU capacity accounting — subtracts old allocation from source GPU, adds new allocation to target GPU; (4) handles cross-GPU reassignment by independently verifying both source GPU (freed capacity must remain non-negative and under cap to detect concurrent-update races) and target GPU (projected usage must not exceed VRAM); (5) handles `assignedGpu`-only changes with VRAM capacity check on the target GPU using the service's existing `gpu` allocation; (6) stores resolved `assignedGpu` on `req.body` for downstream route handlers.
+- **T004 — Auth middleware (`auth.js`) added:** New file providing two named exports: `authMiddleware` validates a Bearer JWT from the `Authorization` header, decodes it with `jwt.verify()`, and attaches the `{ userId, username, role }` payload to `req.user`. Returns 401 on missing header, malformed format, invalid token, or expired token (each with distinct error messages). `requireAdmin` is a downstream authorization gate that enforces `role === 'admin'` and returns 403 on failure. Neither function touches MongoDB.
