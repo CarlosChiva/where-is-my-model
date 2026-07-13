@@ -1,4 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+
+/* ── Auth Context ──────────────────────────────────────────── */
+import { useAuth }      from './context/AuthContext.jsx';
+
+/* ── Auth UI ──────────────────────────────────────────────── */
+import LoginPage        from './components/LoginPage.jsx';
 
 /* ── Custom Hooks ─────────────────────────────────────────── */
 import usePcs           from './hooks/usePcs.js';
@@ -15,6 +21,7 @@ import useServiceHealth from './hooks/useServiceHealth.js';
 import Header               from './components/Header.jsx';
 import PCGrid               from './components/PCGrid.jsx';
 import GPUCalculatorPage    from './components/GpuCalculator/GPUCalculatorPage.jsx';
+import AdminPanel           from './components/AdminPanel.jsx';
 
 import AddPcModal           from './components/Modals/AddPcModal.jsx';
 import EditPcModal          from './components/Modals/EditPcModal.jsx';
@@ -23,6 +30,10 @@ import EditServiceModal     from './components/Modals/EditServiceModal.jsx';
 import DeleteConfirmModal   from './components/Modals/DeleteConfirmModal.jsx';
 
 export default function App() {
+  /* ── Auth hooks — must fire before any data hooks ─────────── */
+  const { user, isAuthenticated, isLoading } = useAuth();
+  const isAdmin = user?.role === 'admin';
+
   /* ── Query hook — master PC list with automatic initial fetch ── */
   const { data: pcs, loading, refetch } = usePcs();
 
@@ -37,6 +48,14 @@ export default function App() {
   /* ── Health check hook — per-service TCP status manager ─── */
   const serviceHealth      = useServiceHealth();
 
+  /* Post-auth refetch trigger — fires when authentication resolves */
+  useEffect(() => {
+    if (isAuthenticated && !isLoading) {
+      refetch();
+      serviceHealth.checkAll();
+    }
+  }, [isAuthenticated, isLoading, refetch, serviceHealth.checkAll]);
+
   /*
    * State: Modal router — single object pattern.
    *  type    → which modal dialog to render (null = none open)
@@ -44,8 +63,25 @@ export default function App() {
    */
   const [modalState, setModalState] = useState({ type: null, payload: null });
 
-  /* State: Page router — 'dashboard' (default) or 'calculator' */
+  /* State: Page router — 'dashboard' (default), 'admin', or 'calculator' */
   const [currentPage, setCurrentPage] = useState('dashboard');
+
+  /* Guard: show spinner while auth state resolves */
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-bg-primary flex items-center justify-center">
+        <svg className="animate-spin h-10 w-10 text-accent" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/>
+        </svg>
+      </div>
+    );
+  }
+
+  /* Guard: unauthenticated users see the login page */
+  if (!isAuthenticated) {
+    return <LoginPage />;
+  }
 
   /* ── Callback handlers ──────────────────────────────────────── */
 
@@ -61,28 +97,39 @@ export default function App() {
   };
 
   /* PC — Persist edited server via mutation hook, close modal; refetch fires on success */
-  const handleEditPc = async (pc) => {
-    const result = await updatePcHook.mutate({ id: pc._id || pc.id, data: pc });
-    if (!result?.error) {
-      closeModal();
-    }
-  };
+  const handleEditPc = isAdmin
+    ? async (pc) => {
+        const result = await updatePcHook.mutate({ id: pc._id || pc.id, data: pc });
+        if (!result?.error) {
+          closeModal();
+        }
+      }
+    : () => {};
+
+  /* PC — Open Add PC modal (FAB button handler) */
+  const handleOpenAddPc = isAdmin
+    ? () => setModalState({ type: 'addPc', payload: null })
+    : () => {};
 
   /* PC — Open DeleteConfirmModal with payload including nombre */
-  const handleDeletePc = ({ pcId, nombre }) => {
-    setModalState({
-      type: 'deleteConfirm',
-      payload: { pcId, nombre, actionType: 'pc' },
-    });
-  };
+  const handleDeletePc = isAdmin
+    ? ({ pcId, nombre }) => {
+        setModalState({
+          type: 'deleteConfirm',
+          payload: { pcId, nombre, actionType: 'pc' },
+        });
+      }
+    : () => {};
 
   /* Service — Open AddServiceModal with PC context */
-  const handleAddService = ({ pcId, gpus, servicios }) => {
-    setModalState({
-      type: 'addService',
-      payload: { pcId, gpus, servicios },
-    });
-  };
+  const handleAddService = isAdmin
+    ? ({ pcId, gpus, servicios }) => {
+        setModalState({
+          type: 'addService',
+          payload: { pcId, gpus, servicios },
+        });
+      }
+    : () => {};
 
   /* Service — Persist new service via mutation hook, close modal; refetch fires on success */
   const handleSaveService = async (serviceData) => {
@@ -94,33 +141,39 @@ export default function App() {
   };
 
   /* Service — Open EditServiceModal with existing service data */
-  const handleEditService = ({ pcId, index, service, gpus, services }) => {
-    setModalState({
-      type: 'editService',
-      payload: { pcId, index, service, gpus, services },
-    });
-  };
+  const handleEditService = isAdmin
+    ? ({ pcId, index, service, gpus, services }) => {
+        setModalState({
+          type: 'editService',
+          payload: { pcId, index, service, gpus, services },
+        });
+      }
+    : () => {};
 
   /*
     * Service — Submit handler called by EditServiceModal.onSave.
     * Editservice modal passes { pcId, index, nombre, puerto, gpu }.
     * We extract pcId + index and bundle the rest as data for the hook.
     */
-  const handleEditServiceSubmit = async (serviceData) => {
-    const { pcId, index, ...data } = serviceData;
-    const result = await updateServiceHook.mutate({ pcId, index, data });
-    if (!result?.error) {
-      closeModal();
-    }
-  };
+  const handleEditServiceSubmit = isAdmin
+    ? async (serviceData) => {
+        const { pcId, index, ...data } = serviceData;
+        const result = await updateServiceHook.mutate({ pcId, index, data });
+        if (!result?.error) {
+          closeModal();
+        }
+      }
+    : () => {};
 
   /* Service — Open DeleteConfirmModal with actionType: 'service' */
-  const handleDeleteService = ({ pcId, index }) => {
-    setModalState({
-      type: 'deleteConfirm',
-      payload: { pcId, index, actionType: 'service' },
-    });
-  };
+  const handleDeleteService = isAdmin
+    ? ({ pcId, index }) => {
+        setModalState({
+          type: 'deleteConfirm',
+          payload: { pcId, index, actionType: 'service' },
+        });
+      }
+    : () => {};
 
   /*
    * Confirmation handler for delete modals.
@@ -129,18 +182,20 @@ export default function App() {
    *   'service'→ calls deleteServiceHook.mutate
    * Refetch fires automatically via each hook's onSuccess callback.
    */
-  const handleConfirmDelete = async () => {
-    const { actionType, pcId, index } = modalState.payload || {};
-    let result;
-    if (actionType === 'pc') {
-      result = await deletePcHook.mutate(pcId);
-    } else if (actionType === 'service') {
-      result = await deleteServiceHook.mutate({ pcId, index });
-    }
-    if (!result?.error) {
-      closeModal();
-    }
-  };
+  const handleConfirmDelete = isAdmin
+    ? async () => {
+        const { actionType, pcId, index } = modalState.payload || {};
+        let result;
+        if (actionType === 'pc') {
+          result = await deletePcHook.mutate(pcId);
+        } else if (actionType === 'service') {
+          result = await deleteServiceHook.mutate({ pcId, index });
+        }
+        if (!result?.error) {
+          closeModal();
+        }
+      }
+    : () => {};
 
   /* Build confirmation message from modal payload */
   const deleteMessage = modalState.payload
@@ -166,16 +221,18 @@ export default function App() {
         currentPage={currentPage}
         onPageChange={handlePageChange}
         pcs={pcs}
+        isAdmin={isAdmin}
       />
 
-      {/* Page router: dashboard (grid + modals) vs calculator */}
-      {currentPage === 'dashboard' ? (
-        <>
-          {/* Responsive grid of PC cards with editing actions */}
+       {/* Page router: dashboard (grid + modals), admin user management, or calculator */}
+       {currentPage === 'dashboard' ? (
+         <>
+           {/* Responsive grid of PC cards with editing actions */}
           <PCGrid
             pcs={pcs}
             loading={loading}
             serviceHealth={serviceHealth}
+            isAdmin={isAdmin}
             onEditPc={(pc) => setModalState({ type: 'editPc', payload: pc })}
             onAddService={handleAddService}
             onDeletePc={handleDeletePc}
@@ -244,9 +301,11 @@ export default function App() {
             />
           )}
         </>
-      ) : (
-        <GPUCalculatorPage />
-      )}
+       ) : currentPage === 'admin' ? (
+         <AdminPanel />
+       ) : (
+         <GPUCalculatorPage />
+       )}
 
       {/* Floating "Refresh Health" button — dashboard only */}
       {currentPage === 'dashboard' && (
@@ -278,11 +337,11 @@ export default function App() {
         </button>
       )}
 
-      {/* Floating "Add PC" button — dashboard only */}
-      {currentPage === 'dashboard' && (
+      {/* Floating "Add PC" button — dashboard only, admin only */}
+      {currentPage === 'dashboard' && isAdmin && (
         <button
           type="button"
-          onClick={() => setModalState({ type: 'addPc', payload: null })}
+          onClick={handleOpenAddPc}
           aria-label="Add PC"
           className="fixed bottom-6 right-6 z-40 w-12 h-12 md:w-14 md:h-14 rounded-full bg-accent text-bg-primary shadow-fab hover:bg-accent-hover active:scale-95 transition-all flex items-center justify-center focus:outline-none focus:ring-[0_0_0_3px] focus:ring-accent-dim"
         >

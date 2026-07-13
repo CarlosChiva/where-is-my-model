@@ -90,8 +90,9 @@ Lockfile that records which external agent skills are installed in this project 
 | **Build tool** | Vite 5+ (ESM, HMR) | Fast dev server, production bundler |
 | **Styling** | Tailwind CSS | Utility-first classes applied directly in JSX templates |
 | **Backend framework** | Express 4.x | RESTful HTTP API, routing, middleware pipelines |
+| **Authentication** | bcryptjs + jsonwebtoken | Password hashing (pre-save hook), JWT signing/verification for session management |
 | **ODM** | Mongoose 8.x | Schema definitions, validation MongoDB queries |
-| **Database** | MongoDB 7 | Persistent document storage for PC inventory and nested services |
+| **Database** | MongoDB 7 | Persistent document storage for PC inventory, user accounts, and nested services |
 | **Container orchestration** | Docker Compose v3.9 | Three-service stack on a bridge network |
 
 ### Full client–server data flow
@@ -132,9 +133,11 @@ Browser (port 3000)
 │       ├── express.json() body parser        │
 │       ├── GET /api/health (inline)           │
 │       ├── Route registration:               │
-│       │     /api/check-health FIRST          │
-│       │     /api/pcs/:pcId/services SECOND   │
-│       │     /api/pcs THIRD                   │
+│       │     /api/auth FIRST                  │
+│       │     /api/users SECOND                │
+│       │     /api/check-health THIRD          │
+│       │     /api/pcs/:pcId/services FOURTH   │
+│       │     /api/pcs FIFTH                   │
 │       └── Global error handler              │
 │                                             │
 │  middleware/validation.js                   │
@@ -147,8 +150,21 @@ Browser (port 3000)
 │         servicios subdocuments, per-GPU      │
 │         virtual fields, VRAM-cap validators  │
 │                                             │
+│  models/User.js ⭐ NEW                       │
+│       → Authenticated user model             │
+│         bcryptjs pre-save password hashing   │
+│         role-based access (admin / user)     │
+│                                             │
 │  routes/ (Express Routers)                  │
 │       → MongoDB CRUD via PC model            │
+│                                             │
+│  ✅ routes/auth.js                          │
+│       → POST /register, /login              │
+│       → GET  /me (JWT-protected)            │
+│                                             │
+│  ✅ routes/users.js                          │
+│       → GET / (admin-only user list)        │
+│       → PUT /:userId/role (change role)     │
 │                                             │
 └──────────────┬──────────────────────────────┘
                │  Mongoose connection string:
@@ -165,6 +181,15 @@ Browser (port 3000)
 │       └── servicios     [{ nombre, puerto,  │
 │                           gpu, assignedGpu}] │
 │                                             │
+│  ⭐ Collection: "users" (NEW)                │
+│       ├── username      (string, unique,    │
+│       │                 3-64 chars)          │
+│       ├── password      (string, hashed     │
+│       │                 with bcryptjs,       │
+│       │                 select: false)       │
+│       └── role          (enum: admin/user,  │
+│                         default: user)      │
+│                                             │
 │  Volume: mongo-data:/data/db (persistent)   │
 └─────────────────────────────────────────────┘
 ```
@@ -175,13 +200,15 @@ Browser (port 3000)
 
 2. **Data persistence** — Every PC (compute server) is a single MongoDB document in the `pcs` collection. Services running on that server are embedded subdocuments within the parent PC record. No separate services collection exists. The Mongoose `PC` model defines per-GPU VRAM capacity validators that fire both at the schema level and during `.save()`.
 
-3. **API contract** — The backend exposes two REST resources: `POST/GET/PUT/DELETE /api/pcs` for server management, and nested `POST/GET/PUT/DELETE /api/pcs/:pcId/services` for service lifecycle. All responses use a standard envelope (`{ data?, error?, success }`). Validation middleware intercepts request bodies before they reach route handlers, collecting all field errors into a single aggregated response.
+3. **API contract** — The backend exposes five REST resources: `POST/GET/PUT/DELETE /api/pcs` for server management, nested `POST/GET/PUT/DELETE /api/pcs/:pcId/services` for service lifecycle, `POST /register` and `/login` plus `GET /me` at `/api/auth` for user authentication, `GET /api/users` for admin-only user listing, and TCP health probes at `/api/check-health`. All responses use a standard envelope (`{ data?, error?, success }`). Validation middleware intercepts request bodies before they reach route handlers, collecting all field errors into a single aggregated response.
 
 4. **Frontend orchestration** — The React SPA's `App.jsx` is the sole orchestrator: it owns all data-fetching hooks and mutation hooks, manages a modal-state router object to decide which dialog renders, and switches between dashboard and calculator views via a single `currentPage` state variable. Modals receive mutable callbacks; on success they trigger `refetch` through each hook's `onSuccess` callback, keeping the UI in sync with server state without manual refresh logic.
 
 5. **GPU calculator** — Independent of the CRUD flow, the calculator page (`GPUCalculatorPage.jsx`) imports the same utility functions from `utils/` that power dashboard visuals (`gpuHelpers.js` for colour coding/clamping, `calculatorEngine.js` for VRAM estimation across seven attention architectures). This ensures the numbers shown in the calculator match the visualisation on the dashboard.
 
 6. **Data seeding and testing** — `seed.js` in the backend reads a flat `data.json` from the repository root, transforms it into Mongoose-compatible documents, and populates the `pcs` collection. Two integration tests (`test-gpu-cap.js` and `target: test-gpu-cap.sh`) exercise the VRAM capacity enforcement end-to-end with auto-cleanup.
+
+7. **Authentication layer** — The backend is instrumented for JWT-based session authentication. A new `User` Mongoose model (`models/User.js`) stores accounts in a separate `users` MongoDB collection, with passwords hashed via `bcryptjs` (10 salt rounds) in a pre-save hook and verified via an instance method `comparePassword()`. Two new production dependencies (`bcryptjs`, `jsonwebtoken`) are installed. JWT signing key (`JWT_SECRET`) and token lifetime (`JWT_EXPIRES_IN=1d`) are configured in `.env.development`. The auth middleware (`middleware/auth.js`) and auth routes (`routes/auth.js` with `/api/auth/register`, `/api/auth/login`, `/api/auth/me`) sit between CORS/body-parser middleware and the PC/service route handlers. Registration uses a pending-approval flow: the first user gets `'admin'` + JWT immediately; all subsequent registrations receive `'pending'` role and a Spanish-language confirmation message (no JWT). An admin must explicitly approve each pending user via `PUT /api/users/:userId/role` before they can log in.
 
 ---
 
@@ -206,3 +233,18 @@ Browser (port 3000)
 | Startup ordering, networking, volumes | `docker-compose.yml` (above) |
 | VRAM calculator algorithm details | `frontend/src/utils/calculatorEngine.js` (documented in [Src.md](./frontend/src/Src.md) under `utils/`) |
 | Per-GPU capacity enforcement chain | Spans `backend/middleware/`, `backend/models/`, and `backend/routes/` (all documented in [Backend.md](./backend/Backend.md)) |
+| Authentication system (models, JWT config, pending routes) | `backend/models/User.js`, `backend/.env.development` (see [Backend.md](./backend/Backend.md) under "Authentication infrastructure") |
+
+---
+
+## 🔄 Changes in this update
+
+- **T001 — Auth dependencies installed:** Added `bcryptjs@^3.0.3` and `jsonwebtoken@^9.0.3` to the technology stack summary table. Both packages are now production dependencies in `backend/package.json`.
+- **T002 — JWT environment variables:** Documented new env vars `JWT_SECRET` and `JWT_EXPIRES_IN=1d` as configuration backing the authentication layer.
+- **T003 — Authentication system overview:** Added the "users" MongoDB collection to the architecture diagram (with schema fields), added User.js model reference with auth routes and middleware notes in the backend section of the diagram, added paragraph #7 ("Authentication layer") to "How the pieces fit together", and added a quick-reference row pointing to Backend.md's authentication infrastructure section.
+
+---
+
+## 🔄 Changes in this update
+
+- **T2 — Pending registration flow:** Paragraph #7 under "How the pieces fit together" updated to describe the pending-approval pattern: first user gets admin + JWT, subsequent users get `pending` role and a Spanish confirmation message (no token), requiring explicit admin approval before they can log in.

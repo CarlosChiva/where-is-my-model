@@ -2,6 +2,7 @@ import express from 'express';
 import { isValidObjectId } from 'mongoose';
 import PC from '../models/PC.js';
 import { checkPcServices, checkAllServices } from '../services/healthChecker.js';
+import { authMiddleware } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -9,7 +10,7 @@ const router = express.Router();
 /*  POST /pcs/:pcId — Health-check services on a single PC             */
 /* ------------------------------------------------------------------ */
 
-router.post('/pcs/:pcId', async (req, res) => {
+router.post('/pcs/:pcId', authMiddleware, async (req, res) => {
   try {
     const pcId = req.params.pcId;
 
@@ -38,7 +39,7 @@ router.post('/pcs/:pcId', async (req, res) => {
 /*  POST /all — Health-check services across the entire fleet          */
 /* ------------------------------------------------------------------ */
 
-router.post('/all', async (req, res) => {
+router.post('/all', authMiddleware, async (req, res) => {
   try {
     const pcs = await PC.find();
     const results = await checkAllServices(pcs);

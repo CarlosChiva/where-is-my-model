@@ -1,10 +1,10 @@
 # `components`
 
 > Path: `frontend/src/components/`
-> Last updated: 2026-07-11
+> Last updated: 2026-07-12
 > Type: Composite folder
 
-React UI components for the GPU Infrastructure Dashboard. Contains six presentational components (Header, GPUBar, GPUDetails, ServiceRow, PCCard, PCGrid) that follow a strict unidirectional data-flow pattern: they receive data and callbacks as props, perform no data fetching, and delegate all mutations back to the root `App.jsx`. Includes a `Modals/` subfolder with five modal-dialog components for data-entry, editing, and deletion confirmations.
+React UI components for the GPU Infrastructure Dashboard. Contains six presentational dashboard components (Header, GPUBar, GPUDetails, ServiceRow, PCCard, PCGrid) that follow a strict unidirectional data-flow pattern: they receive data and callbacks as props, perform no data fetching, and delegate all mutations back to the root `App.jsx`. Includes a `Modals/` subfolder with five modal-dialog components for data-entry, editing, and deletion confirmations. Also includes two full-page standalone components: `LoginPage.jsx` (authentication with tab-based login/register workflows) and `AdminPanel.jsx` (user role management with toggleable admin/user roles).
 
 ---
 
@@ -33,26 +33,30 @@ This component has no imports; it uses only native browser APIs internally.
 
 ### Functions
 
-#### `Header({ pcs, currentPage, onPageChange }) → JSX.Element` _(default export)_
+#### `Header({ pcs, currentPage, onPageChange, isAdmin }) → JSX.Element` _(default export)_
 
 Renders the application header with title, summary stats, and tab navigation.
 
 - **`pcs: Array<PC>`** — Full array of server objects; used to compute `serverCount` (array length) and `serviceCount` (sum of all `pc.servicios.length`).
-- **`currentPage: string`** _(default: `'dashboard'`)_ — Active page identifier. Accepted values: `'dashboard'` or `'calculator'`. Determines which tab is visually highlighted.
-- **`onPageChange: (pageId: string) => void`** _(optional)_ — Callback invoked when the user clicks a tab. Receives the `id` of the selected tab (`'dashboard'` or `'calculator'`). Guard-checked (`onPageChange && onPageChange(tab.id)`) so it is safe to omit.
+- **`currentPage: string`** _(default: `'dashboard'`)_ — Active page identifier. Accepted values: `'dashboard'`, `'calculator'`, or (conditionally) `'admin'`. Determines which tab is visually highlighted.
+- **`onPageChange: (pageId: string) => void`** _(optional)_ — Callback invoked when the user clicks a tab. Receives the `id` of the selected tab (`'dashboard'`, `'calculator'`, or `'admin'`). Guard-checked (`onPageChange && onPageChange(tab.id)`) so it is safe to omit.
+- **`isAdmin: boolean`** _(default: `false`)_ — Controls whether the "Admin" tab appears in navigation. When `true`, an additional `{ id: 'admin', label: 'Admin' }` entry is conditionally appended to the tabs array via spread syntax. When `false` (the default), only Dashboard and Model Calculator tabs are rendered.
 
 **Tab configuration**:
 
-A local constant array defines the two navigation tabs:
+A local constant defines two base tabs, with a conditional third tab appended via spread syntax when `isAdmin` is `true`:
 ```js
 const tabs = [
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'calculator', label: 'Model Calculator' },
+  ...(isAdmin ? [{ id: 'admin', label: 'Admin' }] : []),
 ];
 ```
 Each tab is rendered via `.map()` producing a `<button>` with `role="tab"` and `aria-selected` bound to the active state. Active tab uses accent-filled styling (`bg-accent text-bg-primary`); inactive tabs use input-bg styling with hover highlight (`bg-bg-input text-text-secondary hover:text-text-primary`). The nav container has `aria-label="Page navigation"`.
 
-**Layout**: Header root `<header>` uses centered flex column (`flex flex-col items-center gap-4`). Inner content is a centered column (`flex flex-col gap-2 text-center items-center`) containing the title, live summary stats, and tab navigation. No conditional rendering — no action buttons are rendered by this component.
+**Conditional Admin tab (T9):** The `isAdmin` prop drives a conditional spread into the tabs array: `...(isAdmin ? [{ id: 'admin', label: 'Admin' }] : [])`. When `true`, a third "Admin" tab renders alongside the Dashboard and Model Calculator tabs, enabling navigation to the `<AdminPanel />` view. When `false` (default), only the two base tabs appear — ensuring non-admin users never see the admin route option in the header.
+
+**Layout**: Header root `<header>` uses centered flex column (`flex flex-col items-center gap-4`). Inner content is a centered column (`flex flex-col gap-2 text-center items-center`) containing the title, live summary stats, and tab navigation. No action buttons are rendered by this component.
 
 ### Accessibility features
 
@@ -222,9 +226,9 @@ Responsive grid layout container with three conditional rendering states: loadin
 
 ### Functions
 
-#### `PCGrid({ pcs, loading, onEditPc, onAddService, onDeletePc, onEditService, onDeleteService, serviceHealth }) → JSX.Element` _(default export)_
+#### `PCGrid({ pcs, loading, onEditPc, onAddService, onDeletePc, onEditService, onDeleteService, serviceHealth, isAdmin }) → JSX.Element` _(default export)_
 
-Root container for PC cards. Renders a responsive CSS Grid (1 col mobile, 2 col md+, 3 col lg+) with three mutually exclusive states. Now forwards health-check context from the parent hook down to each `PCCard`.
+Root container for PC cards. Renders a responsive CSS Grid (1 col mobile, 2 col md+, 3 col lg+) with three mutually exclusive states. Forwards health-check context from the parent hook down to each `PCCard`. Receives an `isAdmin` flag controlling whether admin-only CRUD action buttons are rendered within the card grid — non-admin users see cards without edit/delete/add-service controls entirely.
 
 - **`pcs: Array<PCObject>`** — Full server array.
 - **`loading: boolean`** — Data fetch in-flight flag.
@@ -249,7 +253,175 @@ Root container for PC cards. Renders a responsive CSS Grid (1 col mobile, 2 col 
 
 ---
 
+## 📄 `LoginPage.jsx`
+
+Standalone full-page authentication component that provides tab-switching login and registration functionality. Manages its own local form state (username, password, field errors, API errors) while delegating all credential operations to the global `AuthContext` via the `useAuth()` hook. No hard reload — post-auth transition is automatic: when a successful login or registration flips `isAuthenticated` to `true` inside `AuthContext`, the `<App>` guard component re-renders and implicitly swaps `<LoginPage />` for the dashboard layout. Styled with the same dark-theme Tailwind utility classes as the rest of the application (`bg-bg-primary`, `bg-bg-card`, accent colors, `font-mono` inputs).
+
+### Imports and dependencies
+
+| Module | Imported elements | Type |
+|--------|-------------------|------|
+| `react` | `useState` | External |
+| `../context/AuthContext` | `useAuth` | Internal |
+
+> **Note:** `useEffect` is no longer imported. It was removed along with the hard-redirect logic. LoginPage is now purely a form component — navigation is handled by the parent `<App>` guard.
+
+### Functions
+
+#### `LoginPage() → JSX.Element` _(default export)_
+
+Full-page centered authentication card with tab-based switching between "Iniciar sesión" (login) and "Registrarse" (register) modes. No external props — all state is internal or sourced from `AuthContext`.
+
+**Auth context consumption:**
+Destructures three keys from `useAuth()`:
+- `login(username, password) → Promise<{ data, error }>` — authentication action.
+- `register(username, password) → Promise<{ data, error }>` — account creation action.
+- `isLoading: boolean` — async operation in-flight indicator (used to disable the submit button and show a spinner).
+
+> **Removed:** `isAuthenticated` is no longer destructured from `useAuth()`. Previously it was consumed here to drive a `useEffect` hard redirect (`window.location.href = '/'`). That logic has been moved to `<App>` — when `AuthContext.user` is set, the App-level guard rerenders and swaps out `<LoginPage />` for the dashboard.
+
+**Internal state:**
+
+| Variable | Initial Value | Role |
+|----------|---------------|------|
+| `mode` | `'login'` | Tab mode selector: `'login'` \| `'register'`. Determines which auth action to call and which button labels to display. |
+| `username` | `''` | Controlled text input value for the username field. |
+| `password` | `''` | Controlled password input value. |
+| `fieldErrors` | `{}` | Client-side validation errors keyed by field name (`username`, `password`). Displayed inline below each respective input. |
+| `apiError` | `null` | Server-side error message from the auth API call. Rendered as a styled alert banner above the submit button when truthy. |
+
+**Internal functions:**
+
+- **`validate() → boolean`**
+  Client-side synchronous validation. Checks that `username.trim()` is non-empty and `password` is truthy. Sets `fieldErrors` with descriptive messages for any missing fields. Returns `true` if both fields pass, `false` otherwise.
+
+- **`handleSubmit(e: SyntheticEvent) → Promise<void>`**
+  Form submission handler (wrapped in `async`). Prevents default, clears `apiError`, runs `validate()`. If validation passes, selects the correct action (`mode === 'login' ? login : register`) and awaits it with trimmed credentials. If the result has an error, updates `apiError` for display. On success: `AuthContext` sets `isLoading → false` and populates `user`, which causes the `<App>` guard to swap out `<LoginPage />` — no redirect logic lives in this component anymore.
+
+**Post-auth transition (no longer in LoginPage):**
+```jsx
+/*
+ * No redirect effect needed. App.jsx manages the authenticated guard: when a
+ * successful login flips isAuthenticated to true, the <App> guard rerenders
+ * and automatically transitions from <LoginPage /> back to the dashboard.
+ */
+```
+The previous implementation used `useEffect` with `window.location.href = '/'` to perform a hard navigational reload after authentication. This has been removed in favor of React's declarative rendering: `<App>` conditionally renders either `<LoginPage />` (when unauthenticated) or the full dashboard layout (when authenticated). The state transition is instantaneous and seamless — no page flicker, no browser address bar change, no loss of scroll position or component memoization cache.
+
+**Tab UI:**
+Two buttons rendered via `.map()` over `['login', 'register']`. Each tab:
+- Uses `role="tab"` with dynamic `aria-selected={mode === tab}`.
+- Active tab receives accent-fill styling (`bg-accent text-bg-primary`).
+- Inactive tab uses input-bg styling (`bg-bg-input text-text-secondary hover:text-text-primary`).
+- Clicking any tab resets `apiError` and `fieldErrors` to clear stale error messages.
+
+**Form fields:**
+Each input has:
+- `aria-invalid` bound to the corresponding field error state.
+- Conditional border color: `border-danger focus:border-danger` on validation failure; `border-border focus:border-accent` in normal state.
+- Inline error `<p>` rendered below the input when a field has an error (styled with `text-sm text-danger`).
+- Appropriate `autoComplete` hints (`username`, `current-password` / `new-password`).
+
+**Submit button:**
+Full-width button that is disabled during `isLoading`. Displays an inline SVG spinner (`animate-spin`) and loading text ("Iniciando..." / "Registrando...") while an async operation is in flight. Shows the action label ("Iniciar sesión" / "Registrarse") when idle. Uses accent-filled styling with transition effects and proper disabled-state opacity (`disabled:opacity-50 disabled:cursor-not-allowed`).
+
+**API error alert:**
+Rendered conditionally as a `bg-danger/10` bordered card with `text-danger` message text, positioned between the password field and the submit button. Dismisses automatically when the user switches tabs or corrects form fields.
+
+---
+
+## 📄 `AdminPanel.jsx`
+
+Full-page admin component for User Role Management. Displays a responsive table of all registered users showing their username and current role (`'admin'` or `'user'`). Each row has a toggle button to flip the user's role between `'admin'` and `'user'`. After a successful role change, the list auto-refetches via an `onSuccess` callback wired into the mutation hook. Self-contained — no props required.
+
+### Imports and dependencies
+
+| Module | Imported elements | Type |
+|--------|-------------------|------|
+| `../hooks/useUsers.js` | `useUsers` (default) | Internal |
+| `../hooks/useUpdateUserRole.js` | `useUpdateUserRole` (default) | Internal |
+
+### Functions
+
+#### `AdminPanel() → JSX.Element` _(default export)_
+
+Renders a full-page administrative UI for toggling user roles. No props — all state and data flow comes through the two custom hooks it consumes.
+
+**Hook consumption:**
+
+Two hooks are invoked at the top level:
+
+```js
+const { data: users, loading, error: fetchError, refetch } = useUsers();
+const { loading: updating, error: updateError, mutate, clearError }
+  = useUpdateUserRole({ onSuccess: refetch });
+```
+
+| Hook | Key values consumed | Purpose |
+|------|---------------------|---------|
+| `useUsers()` | `data` (aliased to `users`), `loading`, `error` (aliased to `fetchError`), `refetch` | Fetches the full user list from the API. Provides refetch for both auto-refresh after mutations and manual retry on fetch errors. |
+| `useUpdateUserRole({ onSuccess: refetch })` | `loading` (aliased to `updating`), `error` (aliased to `updateError`), `mutate`, `clearError` | Role mutation hook configured to call `refetch` after a successful role change, ensuring the table stays in sync. |
+
+**Loading guard:**
+If `loading` is truthy, renders a fullscreen centered spinner (inline SVG with `animate-spin`) on a `bg-bg-primary` background — identical pattern used in `LoginPage.jsx` and `App.jsx`. The spinner is a 40×40px circle with partial arc fill (`text-accent`, 4px stroke weight).
+
+**Fetch error guard:**
+If `fetchError` is truthy, renders a centered card dialog containing the page title ("User Management"), a danger-styled alert banner (`bg-danger/10 border border-danger/30`) with the error message, and a full-width "Retry" button that calls `refetch()` on click. Uses accent-filled button styling (`bg-accent text-bg-primary hover:bg-accent-hover`).
+
+**Internal handler — `handleToggle(userId, currentRole)`:**
+Zero-arg arrow function wired to each row's toggle button. Computes the inverse role: `` const nextRole = currentRole === 'admin' ? 'user' : 'admin' `` and passes both values to `mutate(userId, nextRole)`. This triggers the mutation hook's side effect (an API PATCH/PUT call) which, upon success, fires the `onSuccess` callback (`refetch`) to reload the user list.
+
+**Main render — three rendering states:**
+
+1. **Mutation error banner (conditional):** `{updateError && (...)}` — A horizontally arranged danger banner with the error message on the left and a "Dismiss" text button on the right that calls `clearError()`. Positioned above the table within the same content flow as the page title. Dismiss button uses muted styling (`text-text-muted hover:text-text-secondary`) with horizontal margin separation.
+
+2. **Empty state:** `{users.length === 0}` — Centered text inside the card container: "No users found" with `py-12` padding and secondary text color. No table is rendered in this case.
+
+3. **Populated table:** Semantic `<table>` with three columns — Username, Role, Action. Entirely responsive via `overflow-x-auto` wrapper on the containing `<div>`.
+   - **Username column:** Monospace-styled (`font-mono`) primary text.
+   - **Role column:** Pill badge that dynamically styles based on role value. Admin users receive a green pill (`bg-gpu-green/20 text-gpu-green`); regular users receive a neutral muted pill (`bg-bg-hover text-text-muted`). Badge uses `inline-block px-3 py-1 rounded-full text-xs font-medium`.
+   - **Action column:** Toggle button with conditional styling and label:
+     - If user is admin → "Revoke Admin" with danger-styled appearance (`bg-danger/10 text-danger hover:bg-danger/20 border border-danger/30`).
+     - If user is regular → "Make Admin" with accent-styled appearance (`bg-accent/10 text-accent hover:bg-accent/20 border border-accent/30`).
+     - Button is `disabled={updating}` during any in-flight mutation, applying opacity dim and cursor-block styling.
+
+**Table accessibility:** Each row is keyed by `user.userId` (the stable identifier returned by the auth API; previously `user._id` which caused "Invalid user ID format" errors during role mutations). Table headers use `text-xs font-mono uppercase tracking-wide` for a consistent terminal-style header aesthetic matching the dashboard design language. Row hover states transition to `bg-bg-hover`. Bottom border on each row (removed on last row via `last:border-b-0`).
+
+---
+
 ## 🔄 Changes in this update
+
+### LoginPage.jsx — Removed hard reload and auth self-redirect logic
+- **Removed** the `useEffect` redirect block that used `window.location.href = '/'` when `isAuthenticated` became `true`. This hard navigational reload caused a full page refresh, losing all React component state, memoization caches, and scroll position.
+- **Removed** unused imports: `useEffect` from `react` and `isAuthenticated` from the `useAuth()` destructuring. LoginPage now imports only `useState` from `react` and consumes three keys from `AuthContext`: `login`, `register`, and `isLoading`.
+- **New transition model:** Post-auth navigation is entirely declarative. `handleSubmit` calls `login()` or `()` — both set the `user` state inside `AuthContext`. The parent `<App>` component monitors this state change via its own conditional rendering guard: when `isAuthenticated` flips to `true`, `<App>` rerenders and swaps `<LoginPage />` with the dashboard layout (containing `<Header>`, `<PCGrid>`, etc.). No redirect, no reload, no address bar flicker.
+- **Code comment preserved:** LoginPage.jsx includes an inline block comment explaining this design decision: *"No redirect effect needed. App.jsx manages the authenticated guard..."* — future maintainers will understand why there is no `useEffect` in this component.
+- **Impact smoother UX.** The login→dashboard transition is now instant, with zero browser repaint overhead. All hook subscriptions, data fetches, and component memoization remain live throughout the entire post-auth transition continues to function identically (same validation, same error handling, same button states). Only the redirect mechanism was replaced.
+- **Impact:** Smoother UX — no browser reload flash, no lost React.memo caches, no duplicate hook effects firing on a full page refresh.
+
+### AdminPanel.jsx — Fix user ID references (`user._id` → `user.userId`)
+- **Updated** `AdminPanel.jsx` at two locations: (1) row key prop changed from `key={user._id}` to `key={user.userId}` (line 84); (2) toggle handler call changed from `handleToggle(user._id, user.role)` to `handleToggle(user.userId, user.role)` (line 103).
+- **Bug fixed:** Previously both references used `user._id` which is a MongoDB ObjectId string. The `useUpdateUserRole` hook's `mutate()` function expects a `userId` parameter — passing `_id` triggered an "Invalid user ID format" error when attempting to grant/revoke admin permissions. The correct identifier is `user.userId`, which matches the shape returned by the auth API's user list endpoint.
+- **Impact:** Role toggles ("Make Admin" / "Revoke Admin") now correctly route through the mutation hook without validation errors.
+
+### T9 — Header.jsx conditional Admin tab via `isAdmin` prop
+- **Updated** `Header.jsx` function signature: added `isAdmin = false` as a new default parameter alongside `pcs`, `currentPage = 'dashboard'`, and `onPageChange`. When `true`, the tabs array conditionally appends `{ id: 'admin', label: 'Admin' }` via spread syntax (`...(isAdmin ? [{ id: 'admin', label: 'Admin' }] : [])`). When `false` (default), only Dashboard and Model Calculator tabs render.
+- **Updated** accepted `currentPage` values to now include `'admin'` in addition to `'dashboard'` and `'calculator'`.
+- **Impact:** Non-admin users see only two navigation tabs; admin users see a third "Admin" tab that navigates to `<AdminPanel />`. This keeps the Admin route visible only to authorized users at the header level.
+
+---
+
+### AdminPanel.jsx — New User Role Management component
+- **Added** full documentation for `AdminPanel.jsx` as a new direct file in the components composite folder.
+- Documented hook consumption (`useUsers()` and `useUpdateUserRole({ onSuccess: refetch })`), three guard states (loading spinner, fetch-error dialog with retry, mutation error banner with dismiss), internal `handleToggle()` handler, conditional role badge styling (green pills for admin, muted pills for user), toggle buttons with inverted labels ("Make Admin" / "Revoke Admin"), and the empty-state table row.
+- This component is self-contained (no props) and auto-refreshes the user list after each successful role mutation via the `onSuccess: refetch` callback wired into `useUpdateUserRole`.
+
+---
+
+### LoginPage.jsx — New authentication page component
+- **Added** full documentation for `LoginPage.jsx` as a new direct file in the components composite folder.
+- Documented all internal state variables, validation logic, form handling, tab-based UI, and AuthContext integration.
+- This component is self-contained (no props) and delegates credential operations to `AuthContext` via `useAuth()`. It provides client-side field validation, styled error banners, loading spinners, and automatic redirect on successful authentication.
 
 ### Initial creation (T13)
 - **Created** `docs/documentation/frontend/src/components.md` — composite folder documentation for `frontend/src/components/`.

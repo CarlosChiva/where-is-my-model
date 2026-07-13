@@ -78,6 +78,61 @@ Top-level schema for a GPU server entity. Stores the server name, IPv4 address, 
 
 ---
 
+## 📄 `User.js`
+
+Mongoose model for application authentication. Defines a user entity with password hashing via `bcryptjs`, role-based access (admin / user / pending), and a pre-save hook that automatically hashes plain-text passwords before persistence. The `password` field is excluded from query results by default (`select: false`) to prevent accidental exposure. Schema virtuals are enabled in both JSON serialization and plain-object conversion.
+
+### Imports and dependencies
+
+| Module | Imported elements | Type |
+|--------|-------------------|------|
+| `mongoose` | `mongoose` (default) | External |
+| `bcryptjs` | `bcryptjs` (default namespace) | External |
+
+### Constants
+
+| Constant | Value | Purpose |
+|----------|-------|---------|
+| `SALT_ROUNDS` | `10` | Number of bcrypt salt rounds used for password hashing |
+
+### Classes / Schemas
+
+#### `userSchema` *(Mongoose Schema)*
+
+Schema for authenticated users. Each document stores a unique username, a bcrypt-hashed password, and an access role (`admin`, `user`, or `pending`). Timestamps are enabled automatically. The password field is deselected by default in queries (`select: false`) so it must be explicitly requested via `.select('password')` — this prevents accidental leakage in list or profile endpoints.
+
+**Schema options:**
+
+| Option | Value | Purpose |
+|--------|-------|---------|
+| `timestamps` | `true` | Automatically adds `createdAt` and `updatedAt` fields to every document |
+| `toJSON.virtuals` | `true` | Serializes virtual fields when the document is converted to JSON for API responses |
+| `toObject.virtuals` | `true` | Exposes virtual fields on model instances within Node.js context |
+
+**Fields:**
+
+| Field | Type | Constraints |
+|-------|------|-------------|
+| `username` | `String` | Required, unique, trimmed, minlength 3, maxlength 64. Error messages: *"Username is required."*, *"Username must be at least 3 characters long."*, *"Username must not exceed 64 characters."* |
+| `password` | `String` | Required, minlength 8, `select: false`. Error messages: *"Password is required."*, *"Password must be at least 8 characters long."* |
+| `role` | `String` | Enum `['admin', 'user', 'pending']`, defaults to `'user'` |
+
+**Hooks:**
+
+- **`pre('save')`** — Asynchronous pre-save middleware. If the `password` field has not been modified, skips hashing entirely (preserves efficiency on non-password updates). Otherwise: generates a salt using `bcryptjs.genSalt(SALT_ROUNDS)`, hashes the plain-text password via `bcryptjs.hash()`, and stores the result back on the document. Errors are passed to `next(err)` rather than swallowed.
+
+**Instance methods:**
+
+- **`comparePassword(plainText: string) → Promise<boolean>`**
+  Compares a plain-text password against the stored bcrypt hash using `bcryptjs.compare()`. Returns a promise that resolves to `true` if the passwords match, `false` otherwise. Designed to be called after loading a user document with `.select('password')`.
+
+### Exports
+
+| Export | Type | Description |
+|--------|------|-------------|
+| `default` | `mongoose.model('User', userSchema, 'users')` | Mongoose model named `'User'`, bound to MongoDB collection `'users'` |
+
+
 ## 🔄 Changes in this update
 
 - **Replaced monolithic `vram` field with multi-GPU `gpus[]` array** — The PC schema previously had a single `vram: Number` field representing the total VRAM capacity of the server. This has been replaced by `gpus: Array<{ name: String, vram: Number }>` which allows defining multiple GPUs per server, each with its own name and VRAM capacity.
@@ -86,3 +141,5 @@ Top-level schema for a GPU server entity. Stores the server name, IPv4 address, 
 - **Added `gpus` field-level validator** — A new custom validator on the `gpus` path enforces that at least one GPU must be defined for every PC document.
 - **Rewrote `servicios` document-level validator** — The old validator compared total GPU usage against a single `vram` cap. The new validator performs two checks: (1) rejects services referencing non-existent GPU indices and (2) verifies per-GPU allocation does not exceed that GPU's VRAM capacity.
 - **Added optional HTTP health-check fields to `serviceSchema`** — Three new optional fields were added to support a two-layer HTTP health-check system: `endpoint` (String, nullable), `host` (String, nullable), and `protocol` (enum `'http'`/`'https'`, defaults to `'http'`). These allow each service to advertise an external health-check probe URL (`{protocol}://{host}{endpoint}`).
+- **T003 — Added `User.js` model** — New Mongoose schema for application authentication. Defines three fields: `username` (unique, trimmed, 3–64 chars), `password` (required, minlength 8, `select: false` to prevent accidental exposure), and `role` (enum `['admin', 'user']`, defaults to `'user'`). Includes a `pre('save')` hook that hashes the password using `bcryptjs` with 10 salt rounds (skips hashing if password is unmodified). Provides an instance method `comparePassword(plainText)` for login verification. Model is bound to the MongoDB collection `'users'`.
+- **T1 — Extended `role` enum with `'pending'`** — The `role` field in the `User` schema was updated from `['admin', 'user']` to `['admin', 'user', 'pending']`, allowing users to be created in a provisional state before full activation.

@@ -13,7 +13,7 @@ Express + Mongoose REST API server that manages GPU compute servers and their as
 | Folder | Documentation | Description |
 |--------|--------------|-------------|
 | `models/` | [see docs](./models.md) | Mongoose schema definitions for the PC model (multi-GPU servers with embedded service subdocuments, per-GPU virtual fields, and document-level VRAM-cap validators). |
-| `routes/` | [see docs](./routes.md) | Express Router modules providing CRUD REST endpoints for PCs (`/api/pcs`) and nested Services (`/api/pcs/:pcId/services`), with standardized response envelopes and CastError handling. |
+| `routes/` | [see docs](./routes.md) | Express Router modules providing CRUD REST endpoints for PCs (`/api/pcs`) and nested Services (`/api/pcs/:pcId/services`), authentication flows at `/api/auth`, admin user listing at `/api/users`, and TCP health checks at `/api/check-health`. Standardized response envelopes and CastError handling. |
 | `middleware/` | [see docs](./middleware.md) | Request-body validation middleware (collect-all-errors pattern) that enforces per-GPU VRAM limits, IPv4 format checks, and backward-compatible scalar-vram-to-gpus-array transformation. |
 | `services/` | [see docs](./services.md) | Application-level services — TCP health-check utility (`healthChecker.js`) for probing the reachability of network services hosted on GPU compute servers, using only Node.js built-in `net`. |
 
@@ -23,7 +23,7 @@ Express + Mongoose REST API server that manages GPU compute servers and their as
 
 ### `server.js`
 
-Application entry point. Loads environment configuration, establishes the MongoDB connection via Mongoose, registers Express middleware (CORS with origin allowlist, JSON body parsing), serves a simple inline health check (`GET /api/health`), mounts three route modules in dependency-safe order (health router at `/api/check-health` first, then services router before PCs router to avoid parameter collision), installs a global error handler, and starts listening on the configured port.
+Application entry point. Loads environment configuration, establishes the MongoDB connection via Mongoose, registers Express middleware (CORS with origin allowlist, JSON body parsing), serves a simple inline health check (`GET /api/health`), mounts five route modules in dependency-safe order (auth first, users second, health third, services before PCs to avoid parameter collision), installs a global error handler, and starts listening on the configured port.
 
 ### Imports and dependencies
 
@@ -45,7 +45,7 @@ Application entry point. Loads environment configuration, establishes the MongoD
 ### Functions
 
 - **`registerRoutes() → void`** (async)
-  Dynamically imports and mounts three route modules in order: health router at `/api/check-health` first, services router second at `/api/pcs/:pcId/services`, and PCs router last at `/api/pcs`. The ordering prevents Express from matching `:pcId` against the literal path segments `"services"` or `"check-health"`. Each import is wrapped in try/catch so that a missing route module degrades gracefully (warns to console rather than crashing).
+  Dynamically imports and mounts five route modules in order: auth router at `/api/auth` first, users router at `/api/users` second, health router at `/api/check-health` third, services router fourth at `/api/pcs/:pcId/services`, and PCs router last at `/api/pcs`. The ordering prevents Express from matching `:pcId` against literal path segments (e.g., `"services"`) and ensures static auth/admin routes are registered before any parameterized paths. Each import is wrapped in try/catch so that a missing route module degrades gracefully (warns to console rather than crashing).
   - **Returns:** nothing — side-effect only (calls `app.use()` for each router)
 
 - **`start() → void`** (async)
@@ -230,6 +230,8 @@ Node.js project manifest. Declares the backend as an ES module (`"type": "module
 | `mongoose` | `^8.9.0` | MongoDB ODM — schema definition, validation, model queries |
 | `cors` | ^2.8.5` | Cross-Origin Resource Sharing — origin-restricted preflight support |
 | `dotenv` | `^16.4.0` | Environment variable loading from `.env.development` |
+| `bcryptjs` | `^3.0.3` | Password hashing for user authentication (pre-save hook in User model) |
+| `jsonwebtoken` | `^9.0.3` | JSON Web Token generation and verification for session-based auth |
 
 ---
 
@@ -243,6 +245,8 @@ Environment configuration file loaded by `server.js` (via `dotenv.config({ path:
 | `PORT` | `8080` | HTTP listening port |
 | `MONGODB_URI` | `mongodb://mongo:27017/where-is-my-model` | MongoDB URI — uses Docker Compose service name `mongo` for container-to-container networking |
 | `CLIENT_URL` | `http://localhost:3000` | Frontend origin for CORS allowlist |
+| `JWT_SECRET` | `dev-secret-x7k9m2p4q8w1v5n3b6t0f-yJzRcAsDgHjKmL` | Secret key used to sign and verify JSON Web Tokens for authentication. **This value is dev-only and must be replaced with a strong random value in production.** |
+| `JWT_EXPIRES_IN` | `1d` | Token lifetime — all JWTs expire after 24 hours once issued |
 
 ---
 
@@ -261,6 +265,78 @@ Docker build-context exclusion list. Prevents `node_modules/`, environment files
 | `.vscode/`, `.idea/` | IDE project configuration directories |
 
 ---
+
+## 🔐 Authentication infrastructure (new)
+
+The backend has been instrumented with the foundational components for JWT-based user authentication. Two new production dependencies have been added to `package.json` (`bcryptjs@^3.0.3`, `jsonwebtoken@^9.0.3`), and two corresponding environment variables are present in `.env.development` (`JWT_SECRET`, `JWT_EXPIRES_IN`).
+
+### What exists now
+
+| Component | File / Location | Status |
+|-----------|----------------|--------|
+| **User Mongoose model** | `models/User.js` | ✅ Implemented |
+| **Password hashing (pre-save hook)** | `models/User.js` — `bcryptjs` with 10 salt rounds | ✅ Implemented |
+| **JWT secret and expiry env vars** | `.env.development` | ✅ Configured |
+| **Auth dependencies** | `package.json` — `bcryptjs`, `jsonwebtoken` | ✅ Installed |
+| **Auth middleware** | `middleware/auth.js` | ✅ Active — verifies Bearer JWT, attaches payload to `req.user` |
+| **Auth routes** | `routes/auth.js` | ✅ Active — exposes `/api/auth/register`, `/api/auth/login`, `/api/auth/me` |
+| **Users admin routes** | `routes/users.js` | ✅ Active — exposes `GET /api/users` (admin-only user listing) |
+
+### Planned authentication flow
+
+```
+Client                          Backend                        MongoDB
+  │                                │                               │
+  ├─ POST /api/auth/register ────→ │                               │
+  │   { username, password }       ├─ hash(password) with bcryptjs →│ User.create()
+  │                                ├─ sign JWT(payload, JWT_SECRET) │
+  │   ← { success: true,          │                               │
+  │        token, user } ◀────────┤                               │
+  │                                │                               │
+  ├─ POST /api/auth/login    ────→ │                               │
+  │   { username, password }       ├─ User.findOne(username) ──────→│ .select('password')
+  │                                │ ← user doc                        │
+  │                                ├─ user.comparePassword()        │
+  │                                ├─ sign JWT(payload, JWT_SECRET) │
+  │   ← { success: true,          │                               │
+  │        token, user } ◀────────┤                               │
+  │                                │                               │
+  ├─ GET /api/auth/me            ─→ │                               │
+  │   Authorization: Bearer <jwt>  ├─ verify(token, JWT_SECRET)    │
+  │                                ├─ User.findById(userId) ───────→│ (no .select('password'))
+  │   ← { success: true,         │ ← user doc                       │
+  │        user } ◀──────────────┤                               │
+```
+
+### Active endpoints
+
+All authentication endpoints are now implemented and active in `routes/auth.js`, mounted at `/api/auth`:
+
+| Method | Path | Purpose | Auth required? |
+|--------|------|---------|----------------|
+| `POST` | `/api/auth/register` | Create a new user account; hashes password, signs JWT, returns token + profile | No (public) |
+| `POST` | `/api/auth/login` | Authenticate with username/password; compares bcrypt hash, signs JWT, returns token + profile | No (public) |
+| `GET` | `/api/auth/me` | Return the authenticated user's profile based on the decoded JWT payload | Yes (JWT required) |
+
+Additionally, `routes/users.js` is mounted at `/api/users`:
+
+| Method | Path | Purpose | Auth required? |
+|--------|------|---------|----------------|
+| `GET` | `/api/users` | List all registered users (safe projection only) | Yes — JWT + admin role |
+
+### Role-based access control (active)
+
+The User model supports two roles, enforced via `requireAdmin` middleware from `middleware/auth.js`:
+
+| Role | Current permission scope |
+|------|--------------------------|
+| `'admin'` | Full CRUD access to PCs, services, health probes, and user listing (`GET /api/users`) |
+| `'user'` | Read-only access to PCs and services; admin mutation routes (POST/PUT/DELETE) return 403 |
+
+Role enforcement is active on the following route groups:
+- `routes/pcs.js` — POST, PUT, DELETE require both `authMiddleware` + `requireAdmin`.
+- `routes/users.js` — GET `/api/users` requires both `authMiddleware` + `requireAdmin`.
+
 
 ## Architecture overview
 
@@ -328,3 +404,10 @@ The Dockerfile produces a single-stage Node.js 20 Alpine image. In development, 
 ## 🔄 Changes in this update
 
 - **`server.js`** — Added health router registration inside `registerRoutes()`. A new dynamic import block loads `./routes/health.js` and mounts it at `/api/check-health`, wrapped in try/catch for graceful degradation. The health router is now the *first* registered route, preceding services and PCs routers (order: health → services → pcs). Updated code comments to document all three routers and their ordering rationale. Current documentation now reflects all three dynamically imported route modules instead of the previous two.
+- **T001 — Auth dependencies installed** — Added `bcryptjs@^3.0.3` and `jsonwebtoken@^9.0.3` to production dependencies in `package.json`. Updated dependencies table accordingly.
+- **T002 — JWT environment variables added** — New variables `JWT_SECRET` (dev signing key) and `JWT_EXPIRES_IN=1d` appended to `.env.development`. Updated env vars table with both entries.
+- **T003 — Auth infrastructure section added** — New "Authentication infrastructure" section documenting the User model, password hashing pipeline, planned JWT-based auth flow, pending endpoints (`/api/auth/register`, `/api/auth/login`, `/api/auth/me`), and role-based access control design.
+
+## 🔄 Changes in this update
+
+- **2026-07-12 — Users router registered in `server.js`:** `registerRoutes()` now dynamically imports and mounts a fifth route module: `./routes/users.js` at `/api/users`. It is registered second, between auth (`/api/auth`) and health (`/api/check-health`). Updated the `registerRoutes()` function description to reflect five routers instead of three. Updated the server.js general description accordingly. Added entry in "What exists now" table for the users admin routes.

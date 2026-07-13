@@ -10,7 +10,7 @@ Express route modules for the API server. Each file exports a single `express.Ro
 
 ## 📄 `pcs.js`
 
-REST router for PC CRUD operations against MongoDB. Default-exports an Express `Router` with five endpoints covering list, retrieve, create, update, and delete operations on GPU server entities. Under the multi-GPU data model, each PC has a `gpus: [{ name, vram }]` array (at least one required) replacing the legacy single `vram` field. All responses follow a standard envelope: `{ success: boolean, data?: any, message?: string, errors?: string[] }`. Mongoose validation errors are caught and extracted into a human-readable array; CastError exceptions (invalid ObjectId format) return 400 with a descriptive message; generic errors are logged to console and returned as 500 with a safe message.
+REST router for PC CRUD operations against MongoDB. Default-exports an Express `Router` with five endpoints covering list, retrieve, create, update, and delete operations on GPU server entities. All endpoints are protected by `authMiddleware` (JWT-based authentication) — GET endpoints require any authenticated user, while mutation endpoints (POST, PUT, DELETE) additionally require the `admin` role via `requireAdmin`. Under the multi-GPU data model, each PC has a `gpus: [{ name, vram }]` array (at least one required) replacing the legacy single `vram` field. All responses follow a standard envelope: `{ success: boolean, data?: any, message?: string, errors?: string[] }`. Mongoose validation errors are caught and extracted into a human-readable array; CastError exceptions (invalid ObjectId format) return 400 with a descriptive message; generic errors are logged to console and returned as 500 with a safe message.
 
 ### Imports and dependencies
 
@@ -19,48 +19,61 @@ REST router for PC CRUD operations against MongoDB. Default-exports an Express `
 | `express` | `express` (default) | External |
 | `../models/PC.js` | `PC` (default) | Internal |
 | `../middleware/validation.js` | `validatePcBody` (named) | Internal |
+| `../middleware/auth.js` | `authMiddleware`, `requireAdmin` (named) | Internal |
 
 ### Router endpoints
 
 #### `GET /` — List all PCs
 
-Returns every PC document from the `pcs` collection as a lean (plain-object) array.
+Returns every PC document from the `pcs` collection as a lean (plain-object) array. Protected by `authMiddleware` — requires any authenticated user.
 
+- **Middleware:** `authMiddleware` — verifies Bearer JWT; returns 401 on authentication failure.
 - **Handler:** `async (req, res) => { ... }`
 - **Success response (200):** `{ success: true, data: [...] }` — array of PC plain objects with all schema fields (virtual fields like `totalGpu` are not included).
+- **Unauthorized (401):** Various messages depending on auth failure type (missing token, invalid format, expired token) — handled by upstream `authMiddleware`.
 - **Error response (500):** `{ success: false, message: 'Internal server error' }`
 
 #### `GET /:id` — Get single PC by ID
 
-Retrieves a single PC document by MongoDB `_id`. Uses `PC.findById()` followed by `.lean()` to return a plain JavaScript object instead of a full Mongoose Document. This is consistent with the `GET /` endpoint, which also uses `.lean()`. As a result, virtual fields (including `totalGpu`) are **not** included in the response.
+Retrieves a single PC document by MongoDB `_id`. Uses `PC.findById()` followed by `.lean()` to return a plain JavaScript object instead of a full Mongoose Document. This is consistent with the `GET /` endpoint, which also uses `.lean()`. As a result, virtual fields (including `totalGpu`) are **not** included in the response. Protected by `authMiddleware` — requires any authenticated user.
 
+- **Middleware:** `authMiddleware` — verifies Bearer JWT; returns 401 on authentication failure.
 - **Handler:** `async (req, res) => { ... }`
 - **Parameters:**
   - `params.id`: MongoDB ObjectId string.
 - **Success response (200):** `{ success: true, data: { <PC plain object — no virtual fields> } }`
+- **Unauthorized (401):** Various messages depending on auth failure type — handled by upstream `authMiddleware`.
 - **Bad request (400):** `{ success: false, message: 'Invalid PC ID format.' }` — CastError from invalid ObjectId string
 - **Not found (404):** `{ success: false, message: 'PC not found' }`
 - **Error response (500):** `{ success: false, message: 'Internal server error' }`
 
 #### `POST /` — Create new PC
 
-Creates a new PC document. Accepts `nombre`, `ip`, and `gpus` from the request body. The `servicios` field defaults to an empty array via the Mongoose schema definition. The multi-GPU `gpus` array must contain at least one GPU object `{ name, vram }`.
+Creates a new PC document. Accepts `nombre`, `ip`, and `gpus` from the request body. The `servicios` field defaults to an empty array via the Mongoose schema definition. The multi-GPU `gpus` array must contain at least one GPU object `{ name, vram }`. **Admin-only route** — requires both authentication and admin role.
 
-- **Middleware:** `validatePcBody` — validates request body before handler execution (checks `nombre` non-empty string, `ip` valid IPv4 format with octet range 0-255, `gpus` array with at least one GPU object `{ name, vram }`).
+- **Middleware chain (in order):**
+  1. `authMiddleware` — verifies Bearer JWT; returns 401 on authentication failure.
+  2. `requireAdmin` — enforces `role === 'admin'`; returns 403 for non-admin users.
+  3. `validatePcBody` — validates request body (checks `nombre` non-empty string, `ip` valid IPv4 format with octet range 0-255, `gpus` array with at least one GPU object `{ name, vram }`).
 - **Handler:** `async (req, res) => { ... }`
 - **Request body:**
   - `nombre`: Server name (`string`, required by model).
   - `ip`: IPv4 address (`string`, required, validated by schema regex).
   - `gpus`: Array of GPU objects `{ name: string, vram: number }` (at least one required by model schema).
 - **Success response (201):** `{ success: true, data: { <saved PC document> } }`
+- **Unauthorized (401):** Returned by upstream `authMiddleware` if no/present/invalid/expired token.
+- **Forbidden (403):** `{ success: false, message: 'Admin access required.' }` — returned by `requireAdmin` when the authenticated user's role is not `'admin'`.
 - **Validation error (400):** `{ success: false, errors: [string, ...] }` — array of validation messages from `validatePcBody` middleware or Mongoose validation errors.
 - **Error response (500):** `{ success: false, message: 'Internal server error' }`
 
 #### `PUT /:id` — Update existing PC
 
-Updates metadata fields (`nombre`, `ip`, `gpus`) of an existing PC. Runs Mongoose validators on the updated fields via `{ runValidators: true }`. Returns the updated document with `{ new: true }`.
+Updates metadata fields (`nombre`, `ip`, `gpus`) of an existing PC. Runs Mongoose validators on the updated fields via `{ runValidators: true }`. Returns the updated document with `{ new: true }`. **Admin-only route** — requires both authentication and admin role.
 
-- **Middleware:** `validatePcBody` — validates request body before handler execution (checks `nombre` non-empty string, `ip` valid IPv4 format with octet range 0-255, `gpus` array with at least one GPU object `{ name, vram }`).
+- **Middleware chain (in order):**
+  1. `authMiddleware` — verifies Bearer JWT; returns 401 on authentication failure.
+  2. `requireAdmin` — enforces `role === 'admin'`; returns 403 for non-admin users.
+  3. `validatePcBody` — validates request body (checks `nombre` non-empty string, `ip` valid IPv4 format with octet range 0-255, `gpus` array with at least one GPU object `{ name, vram }`).
 - **Handler:** `async (req, res) => { ... }`
 - **Parameters:**
   - `params.id`: MongoDB ObjectId string.
@@ -69,6 +82,8 @@ Updates metadata fields (`nombre`, `ip`, `gpus`) of an existing PC. Runs Mongoos
   - `ip`: Updated IPv4 address (`string`).
   - `gpus`: Updated array of GPU objects `{ name: string, vram: number }`.
 - **Success response (200):** `{ success: true, data: { <updated PC document> } }`
+- **Unauthorized (401):** Returned by upstream `authMiddleware` if no/invalid/expired token.
+- **Forbidden (403):** `{ success: false, message: 'Admin access required.' }` — returned by `requireAdmin` when the authenticated user's role is not `'admin'`.
 - **Bad request (400):** `{ success: false, message: 'Invalid PC ID format.' }` — CastError from invalid ObjectId string
 - **Not found (404):** `{ success: false, message: 'PC not found' }`
 - **Validation error (400):** `{ success: false, errors: [string, ...] }` — array of validation messages from `validatePcBody` middleware or Mongoose validation errors.
@@ -180,9 +195,83 @@ Parses the integer index, validates bounds, then splices the service from the `s
 
 ---
 
+## 📄 `auth.js`
+
+Express router for JWT-based user authentication. Default-exports an Express `Router` with three endpoints: registration, login, and profile retrieval. Two internal helper functions (`signToken`, `userProfile`) produce the JWT and a safe user-profile object (excludes the hashed password). The `/me` endpoint is protected by the `authMiddleware` from `../middleware/auth.js`. All error responses follow the `{ success: false, message? }` envelope shared across all route modules.
+
+### Imports and dependencies
+
+| Module | Imported elements | Type |
+|--------|-------------------|------|
+| `express` | `express` (default) | External |
+| `jsonwebtoken` | `jwt` (default) | External |
+| `../models/User.js` | `User` (default) | Internal |
+| `../middleware/auth.js` | `authMiddleware` (named) | Internal |
+
+### Helper functions
+
+- **`signToken(user: User) → string`**
+  Creates a signed JWT for an authenticated user. The payload contains three fields: `userId` (stringified `_id`), `username`, and `role`. Signs with `process.env.JWT_SECRET` using `process.env.JWT_EXPIRES_IN` as the expiration claim.
+  - `user`: A Mongoose User document instance.
+  - **Returns:** The signed JWT string, ready to be sent in a Bearer token.
+
+- **`userProfile(user: User) → object`**
+  Builds a safe user-profile object that excludes the hashed password (which is marked `select: false` in the schema). Returns `userId`, `username`, and `role`.
+  - `user`: A Mongoose User document instance.
+  - **Returns:** `{ userId: string, username: string, role: string }`
+
+### Router endpoints
+
+#### `POST /register` — Create a new user account
+
+Accepts `username` and `password` from the request body. Validates both fields are non-empty strings. Checks for duplicate usernames via `User.findOne()`. Uses `User.countDocuments()` to determine the role: the first registered user receives `'admin'`; all subsequent registrations receive `'pending'`. Upon success, persists the new user (which triggers bcryptjs hashing in the pre-save hook). **Response differs by role:** admins receive a JWT token and profile; pending users receive a Spanish-language confirmation message and their role value — no JWT is issued until an admin approves them via `PUT /api/users/:userId/role`.
+
+- **Handler:** `async (req, res) => { ... }`
+- **Request body:**
+  - `username`: Account name (`string`, required). Trimmed before persistence.
+  - `password`: Plain-text password (`string`, required). Hashed by the User model's pre-save hook.
+- **Success response — admin (first user, 201):** `{ success: true, token: <JWT string>, user: { userId, username, role } }`
+- **Success response — pending (subsequent users, 201):** `{ success: true, message: 'Cuenta registrada exitosamente. Espera aprobación del administrador.', role: 'pending' }` — no token is returned; the user must wait for an admin to change their role before they can log in and receive a JWT.
+- **Validation error (400):** `{ success: false, message: 'Username is required.' }` or `{ success: false, message: 'Password is required.' }` — missing/invalid input. Also `{ success: false, errors: [string, ...] }` from Mongoose `ValidationError`.
+- **Conflict (409):** `{ success: false, message: 'Username already exists.' }` — username collision.
+- **Error response (500):** `{ success: false, message: 'Internal server error' }`
+
+#### `POST /login` — Authenticate and receive a JWT
+
+Looks up a user by trimmed username with `.select('+password')` to include the normally-excluded password field. If the user exists, calls the instance method `user.comparePassword(password)` to verify the bcrypt hash. On mismatch or missing user, returns 401. **After password verification, before JWT signing**, an additional guard checks if `user.role === 'pending'`: pending users are rejected with HTTP 403 and a Spanish-language message even though their credentials were correct — they must wait for an admin to approve them via `PUT /api/users/:userId/role`. On success (non-pending, correct credentials), signs a JWT and returns token + profile.
+
+- **Handler:** `async (req, res) => { ... }`
+- **Request body:**
+  - `username`: Account name (`string`, required).
+  - `password`: Plain-text password to compare against the stored hash (`string`, required).
+- **Success response (200):** `{ success: true, token: <JWT string>, user: { userId, username, role } }`
+- **Validation error (400):** `{ success: false, message: 'Username is required.' }` or `{ success: false, message: 'Password is required.' }` — missing/invalid input.
+- **Unauthorized (401):** `{ success: false, message: 'Invalid credentials.' }` — wrong username or password.
+- **Forbidden (403):** `{ success: false, message: 'Tu cuenta está pendiente de aprobación por un administrador.' }` — credentials are correct but the user's role is `'pending'`; no JWT is issued until an admin changes their role via `PUT /api/users/:userId/role`.
+- **Error response (500):** `{ success: false, message: 'Internal server error' }`
+
+#### `GET /me` — Return the authenticated user's profile
+
+Protected endpoint that requires a valid Bearer token. The `authMiddleware` middleware verifies and decodes the JWT before this handler executes, populating `req.user`. The handler simply returns the decoded payload as the user profile — no additional database query is performed because all needed fields (`userId`, `username`, `role`) are already present in the token payload.
+
+- **Middleware:** `authMiddleware` — verifies Bearer JWT; returns 401 on any authentication failure.
+- **Handler:** `(req, res) => { ... }` (synchronous — no database call).
+- **Request headers:**
+  - `Authorization: Bearer <JWT>` (required).
+- **Success response (200):** `{ success: true, user: { userId, username, role } }`
+- **Unauthorized (401):** Various messages depending on the auth failure type (handled by upstream `authMiddleware`).
+
+### Exports
+
+| Export | Type | Description |
+|--------|------|-------------|
+| `default` | `express.Router()` | Router instance with 3 authentication endpoints mounted at `/api/auth` via `server.js` |
+
+---
+
 ## 📄 `health.js`
 
-Express router dedicated to TCP-based service health checks against GPU compute servers. Default-exports an Express `Router` with two POST endpoints that leverage the `healthChecker.js` utility (in `backend/services/`) to probe the reachability of long-running network services hosted on each PC's configured IP address and ports. Uses double ObjectId protection: a preemptive `isValidObjectId()` check before database access, plus a Mongoose `CastError` fallback in the catch block — consistent with conventions established in `pcs.js`. Error responses follow the `{ success: false, message }` envelope pattern shared across all route modules.
+Express router dedicated to TCP-based service health checks against GPU compute servers. Default-exports an Express `Router` with two POST endpoints that leverage the `healthChecker.js` utility (in `backend/services/`) to probe the reachability of long-running network services hosted on each PC's configured IP address and ports. Both endpoints are protected by `authMiddleware` (JWT-based authentication) — any authenticated user may invoke health checks. Uses double ObjectId protection: a preemptive `isValidObjectId()` check before database access, plus a Mongoose `CastError` fallback in the catch block — consistent with conventions established in `pcs.js`. Error responses follow the `{ success: false, message }` envelope pattern shared across all route modules.
 
 ### Imports and dependencies
 
@@ -192,13 +281,15 @@ Express router dedicated to TCP-based service health checks against GPU compute 
 | `mongoose` | `isValidObjectId` (named) | External |
 | `../models/PC.js` | `PC` (default) | Internal |
 | `../services/healthChecker.js` | `checkPcServices`, `checkAllServices` (named) | Internal |
+| `../middleware/auth.js` | `authMiddleware` (named) | Internal |
 
 ### Router endpoints
 
 #### `POST /pcs/:pcId` — Health-check services on a single PC
 
-Validates the PC ObjectId parameter, looks up the PC document from MongoDB (404 if not found), then delegates to `checkPcServices()` which iterates the embedded `servicios` array performing per-port TCP probes. Returns structured status data for each service.
+Validates the PC ObjectId parameter, looks up the PC document from MongoDB (404 if not found), then delegates to `checkPcServices()` which iterates the embedded `servicios` array performing per-port TCP probes. Returns structured status data for each service. Protected by `authMiddleware` — requires any authenticated user.
 
+- **Middleware:** `authMiddleware` — verifies Bearer JWT; returns 401 on authentication failure.
 - **Handler:** `async (req, res) => { ... }`
 - **Parameters:**
   - `params.pcId`: MongoDB ObjectId string of the target PC.
@@ -210,8 +301,9 @@ Validates the PC ObjectId parameter, looks up the PC document from MongoDB (404 
 
 #### `POST /all` — Health-check services across the entire fleet
 
-Fetches every PC document via `PC.find()` and delegates to `checkAllServices()` which runs `checkPcServices()` on each PC concurrently using `Promise.allSettled`. Individual failures do not abort the sweep — they are wrapped with an `error` field in the per-PC result. Returns an array of per-PC health summaries for the entire monitored fleet.
+Fetches every PC document via `PC.find()` and delegates to `checkAllServices()` which runs `checkPcServices()` on each PC concurrently using `Promise.allSettled`. Individual failures do not abort the sweep — they are wrapped with an `error` field in the per-PC result. Returns an array of per-PC health summaries for the entire monitored fleet. Protected by `authMiddleware` — requires any authenticated user.
 
+- **Middleware:** `authMiddleware` — verifies Bearer JWT; returns 401 on authentication failure.
 - **Handler:** `async (req, res) => { ... }`
 - **No parameters required.**
 - **Success response (200):** `{ success: true, data: [{ pcId, id, services: [...] }, ...] }` — array of per-PC result objects from `checkAllServices()`. Each object is augmented with `pcDocIndex` (original array index). Synchronous failures within an individual PC's handler produce an `error` string field.
@@ -222,6 +314,85 @@ Fetches every PC document via `PC.find()` and delegates to `checkAllServices()` 
 | Export | Type | Description |
 |--------|------|-------------|
 | `default` | `express.Router()` | Router instance with 2 health-check endpoints mounted at `/api/health` (or equivalent path) via `server.js` |
+
+---
+
+## 📄 `users.js`
+
+Express router for user administration operations. Default-exports an Express `Router` with three endpoints: listing all registered users, changing a user's role, and deleting a user. All endpoints are protected by `authMiddleware` (JWT verification) and `requireAdmin` (role-based access control), meaning only authenticated admin users can invoke them. Returns safe projections — the hashed password field is excluded both by Mongoose schema (`select: false`) and by explicit projection logic in the handlers. The `DELETE /:userId` endpoint includes a last-admin safeguard that automatically promotes another eligible user to admin before deletion to prevent the loss of all administrator accounts.
+
+### Imports and dependencies
+
+| Module | Imported elements | Type |
+|--------|-------------------|------|
+| `express` | `express` (default) | External |
+| `mongoose` | `mongoose` (default) | External |
+| `../models/User.js` | `User` (default) | Internal |
+| `../middleware/auth.js` | `authMiddleware`, `requireAdmin` (named) | Internal |
+
+### Router endpoints
+
+#### `GET /` — List all users (admin only)
+
+Returns every user document from the `users` collection as a lean array. Projects only `userId` (stringified `_id`), `username`, and `role` — the password hash is never exposed. Protected by two middleware layers: authentication first, then role enforcement.
+
+- **Middleware chain (in order):**
+  1. `authMiddleware` — verifies Bearer JWT; returns 401 on authentication failure.
+  2. `requireAdmin` — enforces `role === 'admin'`; returns 403 for non-admin users.
+- **Handler:** `async (req, res) => { ... }`
+- **Success response (200):** `{ success: true, data: [{ userId, username, role }, ...] }` — array of projected user objects.
+- **Unauthorized (401):** Various messages depending on auth failure type — handled by upstream `authMiddleware`.
+- **Forbidden (403):** `{ success: false, message: 'Admin access required.' }` — returned by `requireAdmin` when the authenticated user's role is not `'admin'`.
+- **Error response (500):** `{ success: false, message: 'Internal server error' }` — logged via `console.error('[users] GET / error:', err)`.
+
+#### `PUT /:userId/role` — Change a user's role (admin only)
+
+Updates the `role` field of an existing user to one of three allowed values: `'admin'`, `'user'`, or `'pending'`. Performs a preemptive `mongoose.Types.ObjectId.isValid()` check on `req.params.userId` before any database access. Validates that `req.body.role` is one of the three allowed values. Uses `User.findByIdAndUpdate()` with `{ new: true, runValidators: true }` to return the fresh document and trigger schema validators. Catches Mongoose `CastError` for malformed ObjectIds that bypass the pre-check. Returns the updated user document (password excluded by schema's `select: false`).
+
+- **Middleware chain (in order):**
+  1. `authMiddleware` — verifies Bearer JWT; returns 401 on authentication failure.
+  2. `requireAdmin` — enforces `role === 'admin'`; returns 403 for non-admin users.
+- **Handler:** `async (req, res) => { ... }`
+- **Parameters:**
+  - `params.userId`: MongoDB ObjectId string of the target user.
+- **Request body:**
+  - `role`: New role value (`string`, must be `'admin'`, `'user'`, or `'pending'`).
+- **Success response (200):** `{ success: true, data: { <updated User document with password excluded> } }`
+- **Bad request (400):** `{ success: false, message: 'Invalid user ID format.' }` — either from the pre-check (`isValid()`) or from a Mongoose `CastError` in the catch block.
+- **Bad request (400):** `{ success: false, message: 'Role must be either "admin", "user" or "pending".' }` — role value not one of the three allowed strings.
+- **Not found (404):** `{ success: false, message: 'User not found.' }` — no user document matches the given `_id`.
+- **Unauthorized (401):** Various messages depending on auth failure type — handled by upstream `authMiddleware`.
+- **Forbidden (403):** `{ success: false, message: 'Admin access required.' }` — returned by `requireAdmin` when the authenticated user's role is not `'admin'`.
+- **Error response (500):** `{ success: false, message: 'Internal server error' }` — logged via `console.error('[users] PUT /:userId/role error:', err)`.
+
+#### `DELETE /:userId` — Delete a user (admin only) with last-admin safeguard
+
+Deletes a user document by `_id`. Performs a preemptive `mongoose.Types.ObjectId.isValid()` check on `req.params.userId` before any database access. Looks up the target user to confirm existence (404 if not found). **Last-admin safeguard:** Before deletion, counts existing admins via `User.countDocuments({ role: 'admin' })`. If only one admin exists (i.e., the targeted user), searches for a non-pending candidate (`role !== 'pending'`, `_id` different from target) to automatically promote to `'admin'` before proceeding. If no eligible candidate exists, returns 400 with an error message — the deletion is aborted. On success, deletes the user via `User.findByIdAndDelete()` and returns 204 No Content. Catches Mongoose `CastError` for malformed ObjectIds that bypass the pre-check.
+
+- **Middleware chain (in order):**
+  1. `authMiddleware` — verifies Bearer JWT; returns 401 on authentication failure.
+  2. `requireAdmin` — enforces `role === 'admin'`; returns 403 for non-admin users.
+- **Handler:** `async (req, res) => { ... }`
+- **Parameters:**
+  - `params.userId`: MongoDB ObjectId string of the target user.
+- **Last-admin safeguard logic:**
+  - Counts admins: `User.countDocuments({ role: 'admin' })`.
+  - If count equals 1 (only admin is the deletion target): searches for a replacement candidate via `User.findOne({ role: { $ne: 'pending' }, _id: { $ne: targetId } })`.
+  - If a candidate is found: sets `candidate.role = 'admin'` and persists via `candidate.save()`, then proceeds with deletion.
+  - If no candidate exists: aborts deletion with HTTP 400 and an explanatory message.
+- **Success response (204):** No content body — empty response indicating successful deletion.
+- **Bad request (400):** `{ success: false, message: 'Invalid user ID format.' }` — either from the pre-check (`isValid()`) or from a Mongoose `CastError` in the catch block.
+- **Bad request (400):** `{ success: false, message: 'Cannot delete the last admin and no other user is available to promote.' }` — last-admin safeguard triggered and no eligible promotion candidate found.
+- **Not found (404):** `{ success: false, message: 'User not found.' }` — no user document matches the given `_id`.
+- **Unauthorized (401):** Various messages depending on auth failure type — handled by upstream `authMiddleware`.
+- **Forbidden (403):** `{ success: false, message: 'Admin access required.' }` — returned by `requireAdmin` when the authenticated user's role is not `'admin'`.
+- **Error response (500):** `{ success: false, message: 'Internal server error' }` — logged via `console.error('[users] DELETE /:userId error:', err)`.
+
+### Exports
+
+| Export | Type | Description |
+|--------|------|-------------|
+| `default` | `express.Router()` | Router instance with 3 admin-only user management endpoints mounted at `/api/users` via `server.js` |
 
 ---
 
@@ -251,3 +422,27 @@ Fetches every PC document via `PC.find()` and delegates to `checkAllServices()` 
 - **2026-07-11 — Multi-GPU `vram` → `gpus` alignment in docs:** Updated all references to the legacy single-GPU `vram` field in `pcs.js` documentation. POST `/api/pcs` and PUT `/api/pcs/:id` now correctly document request body as `{ nombre, ip, gpus }` with the multi-GPU schema `{ name: string, vram: number }[]`. Middleware descriptions, file-level description, and per-endpoint request/response bodies all updated.
 - **2026-07-11 — Per-GPU validator description in `services.js`:** The GPU-cap validator description now accurately reflects the multi-GPU constraint: `sum(svc.gpu where assignedGpu===i) ≤ gpus[i].vram` instead of the legacy single-GPU formula `sum(gpu) ≤ vram`.
 - **2026-07-11 — `health.js` param name fix:** Source corrected from `req.params.pcid` to `req.params.pcId` on line 14 to match the route pattern `:pcId` (case-sensitive). Documentation was already describing `params.pcId`, so no structural change needed — this entry records the source alignment.
+
+## 🔄 Changes in this update
+
+- **T005 — Auth routes (`auth.js`) added:** New Express router providing three authentication endpoints mounted at `/api/auth`. `POST /register` creates a new user account (first user gets `'admin'` role, subsequent users get `'pending'` role), signs a JWT for the first user only — pending users receive a Spanish-language success message instead of a token. `POST /login` authenticates via username/password comparison (bcryptjs), signs a JWT on success, and returns token + profile. `GET /me` is protected by `authMiddleware` and returns the decoded JWT payload as the user profile without an additional database query. Full per-endpoint documentation including imports, helper functions (`signToken`, `userProfile`), request/response shapes, and error handling has been added.
+
+## 🔄 Changes in this update
+
+- **2026-07-12 — Users router (`users.js`) added:** New Express router providing an admin-only user listing endpoint mounted at `/api/users`. `GET /` is protected by both `authMiddleware` and `requireAdmin`, returning a lean projection of `{ userId, username, role }` for all users (password hash excluded). Full per-endpoint documentation including middleware chain, response shapes, and error handling has been added.
+
+## 🔄 Changes in this update
+
+- **2026-07-12 — T2: Added `PUT /:userId/role` endpoint to `users.js`:** New admin-only endpoint for changing a user's role to `'admin'` or `'user'`. Performs preemptive `mongoose.Types.ObjectId.isValid()` validation on the URL parameter, validates that the request body `role` field is one of two allowed values, then updates via `User.findByIdAndUpdate()` with `{ new: true, runValidators: true }`. Catches Mongoose `CastError` for malformed ObjectIds. Updated the `users.js` file description, imports table (added `mongoose`), full per-endpoint documentation, and exports table to reflect both endpoints.
+
+## 🔄 Changes in this update
+
+- **T3 — Pending-user rejection guard in `POST /login`:** After password verification, before JWT signing, a new guard checks if `user.role === 'pending'`. Pending users are now rejected with HTTP 403 and the Spanish message `"Tu cuenta está pendiente de aprobación por un administrador."` even when credentials are correct. Updated the `POST /login` description to describe this new step in the authentication flow and added a **Forbidden (403)** response entry cross-referencing `PUT /api/users/:userId/role` as the admin approval mechanism.
+
+## 🔄 Changes in this update
+
+- **T2 — Pending registration flow in `auth.js`:** The `POST /register` endpoint now assigns `'pending'` (instead of `'user'`) to all non-first users via `User.countDocuments()`. When the assigned role is `'pending'`, the handler skips JWT issuance and returns a Spanish-language confirmation message (`'Cuenta registrada exitosamente. Espera aprobación del administrador.'`) along with `role: 'pending'`. The first user still receives `'admin'` + JWT as before (unchanged). Updated the per-endpoint description, split success response into two distinct shapes (admin vs. pending), corrected all references to `'user'` in prior changelog entries, and added a note cross-referencing `PUT /api/users/:userId/role` as the admin approval mechanism.
+
+## 🔄 Changes in this update
+
+- **T5 — Added `DELETE /:userId` endpoint to `users.js`:** New admin-only endpoint that deletes a user with full last-admin safeguard logic: (1) preemptive ObjectId format validation (400 on invalid), (2) target user lookup (404 if not found), (3) last-admin safeguard — counts current admins, and if only 1 exists, searches for a non-pending candidate (`role !== 'pending'`, different `_id`) to promote to admin before deletion; aborts with 400 if no eligible candidate is found, (4) deletes via `User.findByIdAndDelete()` returning 204 No Content on success. Protected by both `authMiddleware` and `requireAdmin`. Updated the file description to mention three endpoints, added full per-endpoint documentation including safeguard flow details, updated the exports table count from 2 to 3.

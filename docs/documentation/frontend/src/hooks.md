@@ -1,10 +1,10 @@
 # `hooks`
 
 > Path: `frontend/src/hooks/`
-> Last updated: 2026-06-07
+> Last updated: 2026-07-12 (T7 — useDeleteUser)
 > Type: Leaf folder
 
-Custom React hooks for the GPU Infrastructure Dashboard frontend. Provides data-fetching hooks for loading the master list of GPU servers (`usePcs`) and per-server services (`useServices`), six mutation hooks for CRUD operations on PCs and services (create, update, delete), and a health-monitoring hook for per-service TCP status (`useServiceHealth`). Most CRUD hooks follow a consistent pattern: they manage `loading` and `error` state, expose an `onSuccess` callback for side effects, and return a simple object with reactive state and a mutation function.
+Custom React hooks for the GPU Infrastructure Dashboard frontend. Provides data-fetching hooks for loading the master list of GPU servers (`usePcs`), per-server services (`useServices`), and the application user list (`useUsers`), eight mutation hooks for CRUD operations on PCs, services, and users (create, update, delete, role management), and a health-monitoring hook for per-service TCP status (`useServiceHealth`). Most CRUD hooks follow a consistent pattern: they manage `loading` and `error` state, expose an `onSuccess` callback for side effects, and return a simple object with reactive state and a mutation function. The two list-fetching hooks (`usePcs`, `useUsers`) share an identical monotonic fetch-counter staleness guard to prevent race conditions on rapid refetches.
 
 ---
 
@@ -37,8 +37,8 @@ Fetches and manages the master list of GPU servers. Uses a monotonic fetch count
     - **Behavior on error:** Sets `error` to the error message. Distinguishes between `result.error` (API-level) and caught exceptions (`err instanceof Error ? err.message : String(err)`).
     - **Concurrent fetch handling:** If a new fetch is initiated while an older one is in-flight, the older response is silently discarded at three checkpoints: after the `await`, in the `catch` block, and in the `finally` block (prevents `loading` from being reset prematurely).
 
-  - **`useEffect(() => fetchPCs(), [fetchPCs])`**
-    Triggers the initial fetch on component mount. Dependency array includes `fetchPCs` (stable due to `useCallback`), so it runs exactly once.
+  - **`useEffect(() => { const storedToken = localStorage.getItem('token'); if (storedToken) { fetchPCs(); } }, [fetchPCs])`**
+    Triggers the initial fetch on component mount **only if an authentication token is present in `localStorage`**. This defensive check prevents premature 401 errors when the hook mounts before the user has authenticated. Dependency array includes `fetchPCs` (stable due to `useCallback`), so it runs exactly once on mount.
 
 ---
 
@@ -234,11 +234,138 @@ Mutation hook for editing a service on a GPU server. Calls the `updateService` A
 
 ---
 
+## 📄 `useServiceHealth.js`
+
+Centralized per-service TCP health status manager. Maintains a flat map keyed by `"pcId---serviceIndex"` with values `'up'`, `'down'`, or `null` (not yet checked). Auto-charges on mount with a StrictMode safeguard (`mountedRef`) to prevent double-firing during React's development-time strict mode. Self-contained — accepts no props. Uses a monotonic request counter like `usePcs` and `useUsers` to discard stale responses.
+
+### Imports and dependencies
+
+| Module | Imported elements | Type |
+|--------|-------------------|------|
+| `react` | `useState`, `useEffect`, `useCallback`, `useRef` | External |
+| `../services/healthApi.js` | `checkPcHealth`, `checkAllHealth` | Internal |
+
+### Functions
+
+- **`useServiceHealth() → { statuses: Object, loading: boolean, checkSinglePc: Function, checkAll: Function }`**
+  Custom hook that manages TCP health status for all services across the fleet. Initializes `statuses` to `{}`, `loading` to `false`.
+  - **Returns:** An object containing:
+    - `statuses`: Flat map of `"pcId---serviceIndex": 'up' | 'down' | null`
+    - `loading`: Boolean — `true` during in-flight health check
+    - `checkSinglePc`: Function to re-check a single GPU server's services
+    - `checkAll`: Function to re-check all servers
+
+  **Internal functions:**
+
+  - **`flattenResults(data: Array) → Object`**
+    Parses the backend array response into a flat `{ key: status }` map. Iterates over each entry's `services` array, constructing keys as `` `${entry.pcId}---${svc.index}` ``. Defaults to `'down'` when `svc.status` is falsy. Returns empty object if input is not an array.
+
+  - **`checkAll() → Promise<void>`** *(wrapped in `useCallback` with empty deps)*
+    Hits the backend for the entire fleet's health status. Uses monotonic counter (`requestCounter`) to discard stale responses. On error, keeps previous statuses and clears loading without resetting the map. On success, merges new results into the existing `statuses` state using a functional updater.
+
+  - **`checkSinglePc(pcId: string) → Promise<void>`** *(wrapped in `useCallback` with empty deps)*
+    Hits the backend for a single server's health status. Guards with `if (!pcId) return`. Same stale-response discarding logic as `checkAll`. Wraps `[result.data]` when calling `flattenResults` to normalize the single-entry response.
+
+  - **`useEffect(() => { if (mountedRef.current) return; mountedRef.current = true; checkAll(); }, [checkAll])`**
+    Auto-checks all services on initial mount using a StrictMode guard (`mountedRef`). Ensures `checkAll()` fires once per real page load rather than twice during React's development strict mode.
+
+---
+
 ### T12 — Re-read and verification pass (2026-06-07)
 
 - Re-read all 8 source files in `frontend/src/hooks/` to verify documentation accuracy.
 - Confirmed that signatures, return types, imports, and behavioral descriptions match the current codebase with no drift.
 - No structural or functional changes detected since last update.
+
+---
+
+## 📄 `useUsers.js`
+
+Fetches and manages the list of application users (for Admin Panel functionality). Uses a monotonic fetch counter (`useRef(0)`) to allow concurrent refetches without silently dropping explicit calls — only the response from the most recent fetch updates state. Explicit refetches always win; stale or competing in-flight responses are discarded silently. Follows the exact same pattern as `usePcs.js`.
+
+### Imports and dependencies
+
+| Module | Imported elements | Type |
+|--------|-------------------|------|
+| `react` | `useState`, `useEffect`, `useCallback`, `useRef` | External |
+| `../services/userApi.js` | `fetchUsers` | Internal |
+
+### Functions
+
+- **`useUsers() → { data: Array, loading: boolean, error: string \| null, refetch: Function }`**
+  Custom hook that fetches all registered application users. Initializes `data` to `[]`, `loading` to `false`, and `error` to `null`.
+  - **Returns:** An object containing:
+    - `data`: Array of user objects (empty while loading or on error)
+    - `loading`: Boolean — `true` during in-flight fetch
+    - `error`: String or `null` — error message on failure
+    - `refetch`: Reference to `fetchUsersList` (wrapped in `useCallback`) for manual re-fetching
+
+  **Internal functions:**
+
+  - **`fetchUsersList() → Promise<void>`** *(wrapped in `useCallback` with empty deps)*
+    Performs the actual fetch using a monotonic counter stored in `fetchCounter` (`useRef(0)`). Increments the counter before each fetch, capturing `currentCounter`. After the async `fetchUsers()` call returns, compares `currentCounter` against `fetchCounter.current`: if they differ, a newer fetch was initiated and the stale response is discarded (early return). On match, updates `data`/`error` state and resets `loading` to `false` in the `finally` block.
+    - **Behavior on success:** Sets `data` to `result.data` (or empty array if falsy), clears error.
+    - **Behavior on error:** Sets `error` to the error message. Distinguishes between `result.error` (API-level) and caught exceptions (`err instanceof Error ? err.message : String(err)`).
+    - **Concurrent fetch handling:** If a new fetch is initiated while an older one is in-flight, the older response is silently discarded at three checkpoints: after the `await`, in the `catch` block, and in the `finally` block (prevents `loading` from being reset prematurely).
+
+  - **`useEffect(() => fetchUsersList(), [fetchUsersList])`**
+    Triggers the initial fetch on component mount. Dependency array includes `fetchUsersList` (stable due to `useCallback`), so it runs exactly once.
+
+---
+
+## 📄 `useUpdateUserRole.js`
+
+Mutation hook for changing an application user's role. Calls the `updateUserRole` API function from `userApi` and triggers an optional `onSuccess` callback on success. Follows the same pattern as other mutation hooks in this folder: manages `loading` and `error` state via `useState`, uses a try/catch/finally block for robust error handling, and guards the `onSuccess` callback invocation with a null check.
+
+### Imports and dependencies
+
+| Module | Imported elements | Type |
+|--------|-------------------|------|
+| `react` | `useState` | External |
+| `../services/userApi.js` | `updateUserRole` | Internal |
+
+### Functions
+
+- **`useUpdateUserRole({ onSuccess }: { onSuccess: Function }) → { loading: boolean, error: string \| null, mutate: Function, clearError: Function }`**
+  Custom mutation hook for updating a user's role. Initializes `loading` to `false`, `error` to `null`.
+  - `onSuccess`: Optional callback invoked after a successful role update.
+  - **Returns:** An object with `loading`, `error`, `mutate`, and `clearError`.
+
+  **Internal functions:**
+
+  - **`mutate(userId: string, role: string) → Promise<Object>`**
+    Changes the role of an existing user. Sets `loading=true`, clears error, calls `updateUserRole(userId, role)`, handles result errors (`result.error`) and caught exceptions (`err instanceof Error ? err.message : String(err)`), invokes `onSuccess` on success (guarded by `if (result && !result.error && onSuccess)`), and returns the result or `{ data: null, error }` on failure.
+
+  - **`clearError() → void`**
+    Resets the `error` state to `null`. Used by parent components (e.g., Admin Panel role management UI) to dismiss stale API error messages.
+
+---
+
+## 📄 `useDeleteUser.js`
+
+Mutation hook for deleting a user account. Follows the same pattern as `useDeletePc` and `useDeleteService`: manages `loading` and `error` state via `useState`, uses a try/catch/finally block for robust error handling, guards the `onSuccess` callback invocation, and returns `{ data: null, error }` on failure. Exposes `clearError` (added in T10) to allow parent components (AdminPanel) to dismiss stale API errors — e.g., after closing a delete confirmation dialog.
+
+### Imports and dependencies
+
+| Module | Imported elements | Type |
+|--------|-------------------|------|
+| `react` | `useState` | External |
+| `../services/userApi.js` | `deleteUser` | Internal |
+
+### Functions
+
+- **`useDeleteUser({ onSuccess }: { onSuccess: Function }) → { loading: boolean, error: string \| null, mutate: Function, clearError: Function }`**
+  Custom mutation hook for user deletion. Initializes `loading` to `false`, `error` to `null`.
+  - `onSuccess`: Optional callback invoked after a successful delete operation.
+  - **Returns:** An object with `loading`, `error`, `mutate`, and `clearError`.
+
+  **Internal functions:**
+
+  - **`mutate(userId: string) → Promise<Object>`**
+    Deletes a user account by MongoDB `_id`. Sets `loading=true`, clears error, calls `deleteUser(userId)`, handles result errors (`result.error`) and caught exceptions (`err instanceof Error ? err.message : String(err)`), invokes `onSuccess` on success (guarded by `if (result && !result.error && onSuccess)`), and returns the result or `{ data: null, error }` on failure. Resets `loading=false` in the `finally` block regardless of outcome.
+
+  - **`clearError() → void`**
+    Resets the `error` state to `null`. Used by parent components (e.g., AdminPanel) to dismiss stale API error messages — called when closing the delete confirmation dialog so old errors don't persist visually.
 
 ---
 
@@ -271,3 +398,30 @@ Mutation hook for editing a service on a GPU server. Calls the `updateService` A
 - **Updated** return type signature to `{ loading: boolean, error: string | null, mutate: Function, clearError: Function }`.
 - **Updated** `mutate()` description: now includes `setLoading(true)`, `setError(null)`, error handling details matching actual implementation.
 - **Updated** function description: now mentions `clearError` export for dismissing stale API errors, consistent with `useCreatePc`, `useCreateService`, and `useUpdatePc`.
+
+### T7 — useDeleteUser.js addition (2026-07-12)
+- **Added** full documentation for the new file `useDeleteUser.js`:
+  - Imports (`useState` from `react`; `deleteUser` from `../services/userApi.js`).
+  - Single exported default function: `useDeleteUser({ onSuccess })` returning `{ loading, error, mutate }`.
+  - Follows the standard mutation hook pattern matching `useDeletePc` and `useDeleteService`: `useState` for `loading`/`error`, try/catch/finally for async handling, guard-claw on `onSuccess`, returns `{ data: null, error }` fallback on failure.
+  - `mutate(userId)` accepts a single user ID string — intended for Admin Panel user deletion workflows.
+  - Does **not** expose `clearError` (deletion errors self-clear on subsequent calls; consistent with `useDeletePc` and `useDeleteService` patterns).
+- **Updated** general description: now mentions eight mutation hooks (previously seven) to account for the new user deletion capability completing the user CRUD cycle.
+
+### useUpdateUserRole.js addition (2026-07-12)
+- **Added** full documentation for the new file `useUpdateUserRole.js`:
+  - Imports (`useState` from `react`; `updateUserRole` from `../services/userApi.js`).
+  - Single exported default function: `useUpdateUserRole({ onSuccess })` returning `{ loading, error, mutate, clearError }`.
+  - Follows the standard mutation hook pattern matching other hooks in this folder: `useState` for `loading`/`error`, try/catch/finally for async handling, guard-claw on `onSuccess`, returns `{ data: null, error }` fallback on failure.
+  - `mutate(userId, role)` accepts a user ID string and a role string — intended for Admin Panel role management workflows.
+  - Exposes `clearError()` for dismissing stale API errors in parent components.
+- **Updated** general description: now mentions seven mutation hooks (six CRUD + one user-role) instead of six.
+
+### useUsers.js addition (2026-07-12)
+- **Added** full documentation for the new file `useUsers.js`:
+  - Imports (`useState`, `useEffect`, `useCallback`, `useRef` from `react`; `fetchUsers` from `../services/userApi.js`).
+  - Single exported default function: `useUsers()` returning `{ data, loading, error, refetch }`.
+  - Follows the exact same monotonic fetch-counter staleness guard pattern as `usePcs.js`: a `useRef(0)` counter incremented before each async call; stale responses discarded at three checkpoints (after await, in catch, in finally).
+  - Auto-fetches user list on mount via `useEffect`; refetch is exposed via the stable `fetchUsersList` callback.
+  - Intended for Admin Panel components that display and manage registered users.
+- **Updated** general description: now mentions `useUsers` alongside `usePcs` and `useServices` as list-fetching hooks with shared monotonic counter pattern.
