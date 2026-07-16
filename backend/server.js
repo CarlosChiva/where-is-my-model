@@ -5,17 +5,75 @@ dotenv.config({ path: '.env.development' });
 // vars defined at both levels. This is safe because docker-compose env
 // takes precedence.
 
+import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import express from 'express';
+import helmet from 'helmet';
 import mongoose from 'mongoose';
+import { globalLimiter } from './middleware/rateLimit.js';
 
 /* ------------------------------------------------------------------ */
 /*  Configuration                                                     */
 /* ------------------------------------------------------------------ */
 
 const PORT = process.env.PORT || 8080;
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/where-is-my-model';
-const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:3000';
+const CLIENT_URL = process.env.CLIENT_URL || 'https://localhost,http://localhost:3000';
+
+function buildMongoUri() {
+  const host = process.env.MONGODB_HOST || 'localhost';
+  const port = process.env.MONGODB_PORT || '27017';
+  const db = process.env.MONGODB_DATABASE || 'where-is-my-model';
+  const user = process.env.MONGODB_USERNAME;
+  const pass = process.env.MONGODB_PASSWORD;
+
+  if (user && pass) {
+    console.log('[server] ✓ MongoDB: authenticated mode');
+    return `mongodb://${user}:${pass}@${host}:${port}/${db}`;
+  }
+  console.log('[server] ⚠ MongoDB: no-auth mode (local dev)');
+  return `mongodb://${host}:${port}/${db}`;
+}
+
+const MONGODB_URI = buildMongoUri();
+
+/* ------------------------------------------------------------------ */
+/*  Required environment validation                                   */
+/* ------------------------------------------------------------------ */
+
+const JWT_SECRET = process.env.JWT_SECRET;
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN;
+const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
+const JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN;
+
+if (!JWT_SECRET || JWT_SECRET.length < 64) {
+  console.error(
+    '[server] ✗ JWT_SECRET is not set or is too short (minimum 64 characters). ' +
+    'Generate one with: openssl rand -base64 48'
+  );
+  process.exit(1);
+}
+
+if (!JWT_EXPIRES_IN) {
+  console.error(
+    '[server] ✗ JWT_EXPIRES_IN is not set. Default: 15m'
+  );
+  process.exit(1);
+}
+
+if (!JWT_REFRESH_SECRET || JWT_REFRESH_SECRET.length < 64) {
+  console.error(
+    '[server] ✗ JWT_REFRESH_SECRET is not set or is too short (minimum 64 characters). ' +
+    'Generate one with: openssl rand -base64 48'
+  );
+  process.exit(1);
+}
+
+if (!JWT_REFRESH_EXPIRES_IN) {
+  console.error(
+    '[server] ✗ JWT_REFRESH_EXPIRES_IN is not set. Default: 7d'
+  );
+  process.exit(1);
+}
 
 /* ------------------------------------------------------------------ */
 /*  Express app and middleware                                        */
@@ -23,9 +81,22 @@ const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:3000';
 
 const app = express();
 
+// Trust the first reverse proxy (nginx) so that forwarded
+// headers (X-Forwarded-Proto, X-Real-IP, etc.) are honored.
+app.set('trust proxy', 1);
+
+app.use(
+  helmet({
+    crossOriginOpenerPolicy: { policy: 'same-origin' },
+    xXssProtection: false,
+  })
+);
+
 const allowedOrigins = CLIENT_URL.split(',').map(u => u.trim());
-app.use(cors({ origin: allowedOrigins }));
+app.use(cors({ origin: allowedOrigins, credentials: true }));
+app.use(cookieParser());
 app.use(express.json());
+app.use('/api', globalLimiter);
 
 /* ------------------------------------------------------------------ */
 /*  Health check                                                      */
@@ -45,6 +116,19 @@ app.get('/api/health', (req, res) => {
 /* ------------------------------------------------------------------ */
 
 async function registerRoutes() {
+  /* --- 2FA router must be registered BEFORE general auth router ---- */
+  /* so that /api/auth/2fa/* is matched by its own router first.       */
+  try {
+    const twoFactorModule = await import('./routes/twoFactor.js');
+    app.use('/api/auth/2fa', twoFactorModule.default);
+    console.log('[server] ✓ TwoFactor router registered at /api/auth/2fa');
+  } catch {
+    console.warn(
+      '[server] ⚠ TwoFactor router not found — ' +
+      '/api/auth/2fa endpoints unavailable (create routes/twoFactor.js)'
+    );
+  }
+
   try {
     const authModule = await import('./routes/auth.js');
     app.use('/api/auth', authModule.default);

@@ -275,7 +275,7 @@ Used by the `/api` proxy location to set `Connection: $connection_upgrade`, enab
 
 ## 📄 `.env.development`
 
-Environment file loaded by Vite during local development and Docker dev builds. Configures the API proxy target so that frontend fetch requests proxied at `/api/*` reach the correct backend endpoint. In Docker Compose, `VITE_API_PROXY_TARGET=http://backend:8080` resolves via internal Docker DNS. In native local dev, it points to `http://localhost:9003` (the host-mapped backend port). Contains Vite-virtual environment variables prefixed with `VITE_`.
+Environment file loaded by Vite during local development and Docker dev builds. Configures the API proxy target so that frontend fetch requests proxied at `/api/*` reach the correct backend endpoint. In Docker Compose, `VITE_API_PROXY_TARGET=http://backend:8080` resolves via internal Docker DNS. In native local dev, it points to `http://localhost:9003` (the host-mapped backend port). Contains Vite-virtual environment variables prefixed with `VITE_`. This file is excluded from Git (see root `.gitignore`) — create it manually or copy from a local template.
 
 ### Environment variables
 
@@ -298,3 +298,9 @@ Environment file loaded by Vite during local development and Docker dev builds. 
   - `index.html` — SPA shell structure, font loading, Vite integration points.
   - `nginx.conf` — security headers table, gzip config, all location blocks, WebSocket map block.
 - **Added** subfolder reference for `src/` linking to existing `./frontend/src.md`.
+
+---
+
+## 🔄 Changes in this update
+
+- **T5 — Security hardening: .env files moved out of Git tracking:** `frontend/.env.development` is now untracked by Git. Updated the `.env.development` section to note that the file is excluded from Git and must be created manually or copied from a local template.

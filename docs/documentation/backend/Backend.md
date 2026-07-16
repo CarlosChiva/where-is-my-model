@@ -1,7 +1,7 @@
 # `backend`
 
 > Path: `backend/`
-> Last updated: 2026-07-11
+> Last updated: 2026-07-16
 > Type: Composite folder
 
 Express + Mongoose REST API server that manages GPU compute servers and their assigned network services. The backend enforces per-GPU VRAM capacity constraints at the schema level (Mongoose validators), middleware level (request-body validation), and route level (error handling). Deployed as a Node.js 20 Alpine container via Docker Compose, backed by MongoDB for persistent storage. Multi-GPU servers are fully supported — each GPU is individually tracked with its own VRAM allocation pool, and services can be reassigned between GPUs on the same server via partial-update routes.
@@ -13,8 +13,8 @@ Express + Mongoose REST API server that manages GPU compute servers and their as
 | Folder | Documentation | Description |
 |--------|--------------|-------------|
 | `models/` | [see docs](./models.md) | Mongoose schema definitions for the PC model (multi-GPU servers with embedded service subdocuments, per-GPU virtual fields, and document-level VRAM-cap validators). |
-| `routes/` | [see docs](./routes.md) | Express Router modules providing CRUD REST endpoints for PCs (`/api/pcs`) and nested Services (`/api/pcs/:pcId/services`), authentication flows at `/api/auth`, admin user listing at `/api/users`, and TCP health checks at `/api/check-health`. Standardized response envelopes and CastError handling. |
-| `middleware/` | [see docs](./middleware.md) | Request-body validation middleware (collect-all-errors pattern) that enforces per-GPU VRAM limits, IPv4 format checks, and backward-compatible scalar-vram-to-gpus-array transformation. |
+| `routes/` | [see docs](./routes.md) | Express Router modules providing CRUD REST endpoints for PCs (`/api/pcs`) and nested Services (`/api/pcs/:pcId/services`), authentication flows at `/api/auth` (with cookie-based two-token rotation and 2FA intercept), TOTP-based 2FA management at `/api/auth/2fa`, admin user listing at `/api/users`, and TCP health checks at `/api/check-health`. Standardized response envelopes and CastError handling. |
+| `middleware/` | [see docs](./middleware.md) | Request-body validation middleware (collect-all-errors pattern) enforcing per-GPU VRAM limits, IPv4 format checks, and legacy vram-to-gpus-array transformation. Also includes rate-limiting middleware (`express-rate-limit`) with three tiered limiters for global API, authentication endpoints, and health probes. |
 | `services/` | [see docs](./services.md) | Application-level services — TCP health-check utility (`healthChecker.js`) for probing the reachability of network services hosted on GPU compute servers, using only Node.js built-in `net`. |
 
 ---
@@ -23,7 +23,7 @@ Express + Mongoose REST API server that manages GPU compute servers and their as
 
 ### `server.js`
 
-Application entry point. Loads environment configuration, establishes the MongoDB connection via Mongoose, registers Express middleware (CORS with origin allowlist, JSON body parsing), serves a simple inline health check (`GET /api/health`), mounts five route modules in dependency-safe order (auth first, users second, health third, services before PCs to avoid parameter collision), installs a global error handler, and starts listening on the configured port.
+Application entry point. Loads environment configuration, constructs the MongoDB connection URI dynamically via `buildMongoUri()` (supports both authenticated mode for Docker Compose deployments and unauthenticated mode for local development), performs startup validation of required secrets (JWT_SECRET, JWT_EXPIRES_IN, JWT_REFRESH_SECRET, JWT_REFRESH_EXPIRES_IN), establishes the MongoDB connection via Mongoose, registers Express middleware (Helmet security headers, CORS with origin allowlist, cookie parsing via `cookie-parser`, JSON body parsing, global rate limiting), serves a simple inline health check (`GET /api/health`), mounts six route modules in dependency-safe order (twoFactor first to prevent parameter collision, then auth, users, health, services before PCs), installs a global error handler, and starts listening on the configured port. Trusts the first reverse proxy for forwarded headers.
 
 ### Imports and dependencies
 
@@ -31,21 +31,45 @@ Application entry point. Loads environment configuration, establishes the MongoD
 |--------|-------------------|------|
 | `dotenv` | `default` (namespace) | External |
 | `cors` | `default` (namespace) | External |
+| `cookie-parser` | `cookieParser` (default) | External |
 | `express` | `default` (namespace) | External |
+| `helmet` | `default` (namespace) | External |
 | `mongoose` | `default` (namespace) | External |
+| `./middleware/rateLimit.js` | `globalLimiter` (named) | Internal |
 
 ### Configuration
 
 | Variable | Default value | Purpose |
 |----------|--------------|---------|
 | `PORT` | `8080` | HTTP listening port |
-| `MONGODB_URI` | `mongodb://localhost:27017/where-is-my-model` | MongoDB connection string |
+| `MONGODB_HOST` | `localhost` | MongoDB server hostname (Docker: `mongo`; local dev: `localhost`) |
+| `MONGODB_PORT` | `27017` | MongoDB server port |
+| `MONGODB_DATABASE` | `where-is-my-model` | Database name |
+| `MONGODB_USERNAME` | *(empty)* | MongoDB authentication username (leave empty for local dev without auth) |
+| `MONGODB_PASSWORD` | *(empty)* | MongoDB authentication password (leave empty for local dev without auth) |
 | `CLIENT_URL` | `http://localhost:3000` | Comma-separated list of allowed CORS origins |
+
+### Startup validation
+
+Before the Express app is constructed, `server.js` performs two mandatory environment variable checks. If either check fails, the process prints an error to stderr and exits with code 1 — the server will not start.
+
+| Check | Condition | Error message |
+|-------|-----------|---------------|
+| `JWT_SECRET` | Must be set **and** at least 64 characters | `[server] ✗ JWT_SECRET is not set or is too short (minimum 64 characters). Generate one with: openssl rand -base64 48` |
+| `JWT_EXPIRES_IN` | Must be set (any non-empty value) | `[server] ✗ JWT_EXPIRES_IN is not set. Default: 15m` |
+| `JWT_REFRESH_SECRET` | Must be set **and** at least 64 characters | `[server] ✗ JWT_REFRESH_SECRET is not set or is too short (minimum 64 characters). Generate one with: openssl rand -base64 48` |
+| `JWT_REFRESH_EXPIRES_IN` | Must be set (any non-empty value) | `[server] ✗ JWT_REFRESH_EXPIRES_IN is not set. Default: 7d` |
+
+This validation ensures that a developer cannot accidentally start the server with a weak or missing JWT secret, which would compromise all signed tokens.
 
 ### Functions
 
+- **`buildMongoUri() → string`**
+  Dynamically constructs a MongoDB connection URI from component environment variables. Reads `MONGODB_HOST`, `MONGODB_PORT`, `MONGODB_DATABASE`, `MONGODB_USERNAME`, and `MONGODB_PASSWORD` from `process.env`. If both `MONGODB_USERNAME` and `MONGODB_PASSWORD` are present, builds an authenticated URI (`mongodb://user:pass@host:port/db`) and logs `[server] ✓ MongoDB: authenticated mode`. If either credential is missing, builds a plain URI (`mongodb://host:port/db`) and logs `[server] ⚠ MongoDB: no-auth mode (local dev)`. This dual-mode design allows the same server code to run in Docker Compose (with MongoDB auth enabled) and in local development (with MongoDB running without auth).
+  - **Returns:** A valid MongoDB connection URI string.
+
 - **`registerRoutes() → void`** (async)
-  Dynamically imports and mounts five route modules in order: auth router at `/api/auth` first, users router at `/api/users` second, health router at `/api/check-health` third, services router fourth at `/api/pcs/:pcId/services`, and PCs router last at `/api/pcs`. The ordering prevents Express from matching `:pcId` against literal path segments (e.g., `"services"`) and ensures static auth/admin routes are registered before any parameterized paths. Each import is wrapped in try/catch so that a missing route module degrades gracefully (warns to console rather than crashing).
+  Dynamically imports and mounts six route modules in order: twoFactor router at `/api/auth/2fa` first (must precede auth to prevent Express parameter collision), auth router at `/api/auth` second, users router at `/api/users` third, health router at `/api/check-health` fourth, services router fifth at `/api/pcs/:pcId/services`, and PCs router sixth (last) at `/api/pcs`. The ordering prevents Express from matching `:pcId` against literal path segments (e.g., `"services"`) and ensures static auth/2FA routes are registered before any parameterized paths. Each import is wrapped in try/catch so that a missing route module degrades gracefully (warns to console rather than crashing).
   - **Returns:** nothing — side-effect only (calls `app.use()` for each router)
 
 - **`start() → void`** (async)
@@ -228,24 +252,56 @@ Node.js project manifest. Declares the backend as an ES module (`"type": "module
 |---------|---------|------|
 | `express` | `^4.21.0` | Web framework — routing, middleware, request/response handling |
 | `mongoose` | `^8.9.0` | MongoDB ODM — schema definition, validation, model queries |
+| `express-rate-limit` | `^7.5.0` | Rate limiting — protects against brute-force attacks and API abuse with configurable per-IP throttling |
 | `cors` | ^2.8.5` | Cross-Origin Resource Sharing — origin-restricted preflight support |
+| `cookie-parser` | `^1.4.7` | Cookie parsing middleware — reads `req.cookies` from incoming HTTP requests, enabling cookie-based session management (access/refresh tokens, temp 2FA sessions) |
+| `helmet` | `^8.0.0` | Security headers middleware — sets CSP, X-Frame-Options, HSTS, X-Content-Type-Options, Referrer-Policy, Permissions-Policy, and more |
 | `dotenv` | `^16.4.0` | Environment variable loading from `.env.development` |
 | `bcryptjs` | `^3.0.3` | Password hashing for user authentication (pre-save hook in User model) |
 | `jsonwebtoken` | `^9.0.3` | JSON Web Token generation and verification for session-based auth |
+| `speakeasy` | `^2.0.0` | TOTP/Hotp implementation — generates secrets, OTPAuth URIs, and performs timing-safe TOTP code verification for 2FA |
+| `qrcode` | `^1.5.4` | QR code generation — produces data URIs from OTPAuth URLs for scanning by authenticator apps |
 
 ---
 
+### `.env.example`
+
+Template file for environment variables, committed to the repository as an onboarding reference. Contains documented placeholders for all required configuration values, including generation instructions for `JWT_SECRET`. The header includes a `cp` command for quick setup:
+
+```bash
+cp backend/.env.example backend/.env.development
+```
+
+Developers should copy this file to `.env.development` and fill in the real values before running the backend.
+
+| Variable | Placeholder value | Purpose |
+|----------|-------------------|---------|
+| `NODE_ENV` | `development` | Node environment (development \| production) |
+| `PORT` | `8080` | HTTP listening port (inside container) |
+| `MONGODB_HOST` | `mongo` | MongoDB hostname (Docker Compose: `mongo`; local dev: `localhost`) |
+| `MONGODB_PORT` | `27017` | MongoDB port |
+| `MONGODB_DATABASE` | `where-is-my-model` | Database name |
+| `MONGODB_USERNAME` | `admin` | MongoDB authentication username (leave empty for local dev without auth) |
+| `MONGODB_PASSWORD` | `changeme_dev_password` | MongoDB authentication password (leave empty for local dev without auth) |
+| `CLIENT_URL` | `http://localhost:3000` | Comma-separated list of allowed CORS origins |
+| `JWT_SECRET` | `CHANGE_ME_GENERATE_A_STRONG_SECRET` | JWT signing secret — MUST be at least 64 characters. Generate with: `openssl rand -base64 48` |
+| `JWT_EXPIRES_IN` | `1d` | JWT token lifetime (e.g., `1h`, `1d`, `7d`) |
+
 ### `.env.development`
 
-Environment configuration file loaded by `server.js` (via `dotenv.config({ path: '.env.development' })`) during development and via Docker Compose at runtime for production.
+Environment configuration file loaded by `server.js` (via `dotenv.config({ path: '.env.development' })`) during development and via Docker Compose at runtime for production. This file is excluded from Git (see root `.gitignore`) to prevent credential leakage. Create it by copying `.env.example` and replacing the placeholder values with real secrets. The server will refuse to start if `JWT_SECRET` is missing or shorter than 64 characters.
 
 | Variable | Value | Purpose |
 |----------|-------|---------|
 | `NODE_ENV` | `development` | Tells Node.js frameworks to enable verbose debug output and hot-reload modes |
 | `PORT` | `8080` | HTTP listening port |
-| `MONGODB_URI` | `mongodb://mongo:27017/where-is-my-model` | MongoDB URI — uses Docker Compose service name `mongo` for container-to-container networking |
+| `MONGODB_HOST` | `mongo` | MongoDB hostname — uses Docker Compose service name `mongo` for container-to-container networking |
+| `MONGODB_PORT` | `27017` | MongoDB port |
+| `MONGODB_DATABASE` | `where-is-my-model` | Database name |
+| `MONGODB_USERNAME` | `admin` | MongoDB admin username (created by `MONGO_INITDB_ROOT_USERNAME` in docker-compose) |
+| `MONGODB_PASSWORD` | `changeme_dev_password` | MongoDB admin password (created by `MONGO_INITDB_ROOT_PASSWORD` in docker-compose) |
 | `CLIENT_URL` | `http://localhost:3000` | Frontend origin for CORS allowlist |
-| `JWT_SECRET` | `dev-secret-x7k9m2p4q8w1v5n3b6t0f-yJzRcAsDgHjKmL` | Secret key used to sign and verify JSON Web Tokens for authentication. **This value is dev-only and must be replaced with a strong random value in production.** |
+| `JWT_SECRET` | `CHANGE_ME` (placeholder — **must be replaced**) | Secret key used to sign and verify JSON Web Tokens. Server refuses to start if missing or shorter than 64 characters. Generate with: `openssl rand -base64 48`. See `.env.example` for the template. |
 | `JWT_EXPIRES_IN` | `1d` | Token lifetime — all JWTs expire after 24 hours once issued |
 
 ---
@@ -266,21 +322,47 @@ Docker build-context exclusion list. Prevents `node_modules/`, environment files
 
 ---
 
-## 🔐 Authentication infrastructure (new)
+## 🔐 Authentication infrastructure
 
-The backend has been instrumented with the foundational components for JWT-based user authentication. Two new production dependencies have been added to `package.json` (`bcryptjs@^3.0.3`, `jsonwebtoken@^9.0.3`), and two corresponding environment variables are present in `.env.development` (`JWT_SECRET`, `JWT_EXPIRES_IN`).
+The backend has been instrumented with JWT-based user authentication, a cookie-based two-token rotation system (short-lived access token + long-lived refresh token), and TOTP-based two-factor authentication (2FA). Production dependencies in `package.json` include `bcryptjs@^3.0.3`, `jsonwebtoken@^9.0.3`, `cookie-parser@^1.4.7`, `speakeasy@^2.0.0`, and `qrcode@^1.5.4`. Six corresponding environment variables are present in `.env.development`: `JWT_SECRET`, `JWT_EXPIRES_IN`, `JWT_REFRESH_SECRET`, and `JWT_REFRESH_EXPIRES_IN` (plus the MongoDB component variables).
 
 ### What exists now
 
 | Component | File / Location | Status |
 |-----------|----------------|--------|
-| **User Mongoose model** | `models/User.js` | ✅ Implemented |
+| **User Mongoose model** | `models/User.js` | ✅ Implemented — includes 2FA fields (`totpSecret`, `totpEnabled`) |
 | **Password hashing (pre-save hook)** | `models/User.js` — `bcryptjs` with 10 salt rounds | ✅ Implemented |
-| **JWT secret and expiry env vars** | `.env.development` | ✅ Configured |
-| **Auth dependencies** | `package.json` — `bcryptjs`, `jsonwebtoken` | ✅ Installed |
+| **Refresh token model** | `models/RefreshToken.js` | ✅ Implemented — two-token rotation architecture |
+| **JWT secret and expiry env vars** | `.env.development` — access + refresh tokens | ✅ Configured (4 variables: `JWT_SECRET`, `JWT_EXPIRES_IN`, `JWT_REFRESH_SECRET`, `JWT_REFRESH_EXPIRES_IN`) |
+| **Auth dependencies** | `package.json` — `bcryptjs`, `jsonwebtoken`, `cookie-parser`, `speakeasy`, `qrcode` | ✅ Installed |
 | **Auth middleware** | `middleware/auth.js` | ✅ Active — verifies Bearer JWT, attaches payload to `req.user` |
-| **Auth routes** | `routes/auth.js` | ✅ Active — exposes `/api/auth/register`, `/api/auth/login`, `/api/auth/me` |
-| **Users admin routes** | `routes/users.js` | ✅ Active — exposes `GET /api/users` (admin-only user listing) |
+| **Auth routes** | `routes/auth.js` | ✅ Active — session management with cookie-based token rotation and 2FA intercept in login flow |
+| **2FA routes** | `routes/twoFactor.js` | ✅ Active — TOTP setup, verification, status, disable |
+| **Users admin routes** | `routes/users.js` | ✅ Active — exposes `GET /api/users`, `PUT /:userId/role`, `DELETE /:userId` (admin-only) |
+
+### Two-factor authentication flow
+
+```
+Client                          Backend                        MongoDB
+  │                                │                               │
+  ├─ POST /api/auth/2fa/setup ───→ │                               │
+  │   Authorization: Bearer <jwt>  ├─ speakeasy.generateSecret()    │
+  │                                ├─ user.totpSecret = base32     →│ user.save()
+  │                                ├─ qrcode.toDataURL(otpauth_url) │
+  │   ← { success, qrCode,        │                               │
+  │        manualEntry } ◀────────┤                               │
+  │                                │                               │
+  ├─ Scans QR code in authenticator│                               │
+  │   app → receives 6-digit OTP  │                               │
+  │                                │                               │
+  ├─ POST /api/auth/2fa/verify ──→ │                               │
+  │   { code: "123456" }          ├─ speakeasy.totp.verify()      │
+  │   Cookie: tempAuthSession     │   (timing-safe, window: 1)    │
+  │                                ├─ user.totpEnabled = true    →│ user.save()
+  │                                ├─ revoke old refresh tokens  →│ RefreshToken.updateMany()
+  │                                ├─ set access+refresh cookies  │
+  │   ← { success, user } ◀──────┤                               │
+```
 
 ### Planned authentication flow
 
@@ -310,32 +392,48 @@ Client                          Backend                        MongoDB
 
 ### Active endpoints
 
-All authentication endpoints are now implemented and active in `routes/auth.js`, mounted at `/api/auth`:
+All authentication endpoints are implemented and active across two router modules:
+
+**`routes/auth.js`** mounted at `/api/auth`:
 
 | Method | Path | Purpose | Auth required? |
 |--------|------|---------|----------------|
-| `POST` | `/api/auth/register` | Create a new user account; hashes password, signs JWT, returns token + profile | No (public) |
-| `POST` | `/api/auth/login` | Authenticate with username/password; compares bcrypt hash, signs JWT, returns token + profile | No (public) |
-| `GET` | `/api/auth/me` | Return the authenticated user's profile based on the decoded JWT payload | Yes (JWT required) |
+| `POST` | `/api/auth/register` | Create a new user account; hashes password, issues session cookies for admin users | No (public) |
+| `POST` | `/api/auth/login` | Authenticate with username/password; returns 200 + cookies or 403 `2FA_REQUIRED` + temp cookie | No (public) |
+| `POST` | `/api/auth/refresh` | Rotate expired access token via valid refresh token cookie | Yes (refresh cookie) |
+| `GET`  | `/api/auth/me` | Return the authenticated user's profile | Yes (access cookie / Bearer JWT) |
+| `POST` | `/api/auth/logout` | Revoke all refresh tokens and clear cookies | Yes (access cookie / Bearer JWT) |
 
-Additionally, `routes/users.js` is mounted at `/api/users`:
+**`routes/twoFactor.js`** mounted at `/api/auth/2fa`:
 
 | Method | Path | Purpose | Auth required? |
 |--------|------|---------|----------------|
-| `GET` | `/api/users` | List all registered users (safe projection only) | Yes — JWT + admin role |
+| `POST` | `/api/auth/2fa/setup` | Generate TOTP secret + QR code data URI | Yes (access cookie / Bearer JWT) |
+| `POST` | `/api/auth/2fa/verify` | Verify TOTP code; dual-mode (temp session or mid-session) | Temp session cookie OR access cookie |
+| `POST` | `/api/auth/2fa/disable` | Disable 2FA (requires password + current TOTP code) | Yes (access cookie / Bearer JWT) |
+| `GET`  | `/api/auth/2fa/status` | Check if 2FA is enabled for the current user | Yes (access cookie / Bearer JWT) |
+
+**`routes/users.js`** mounted at `/api/users`:
+
+| Method | Path | Purpose | Auth required? |
+|--------|------|---------|----------------|
+| `GET`  | `/api/users` | List all registered users (safe projection only) | Yes — JWT + admin role |
+| `PUT`  | `/api/users/:userId/role` | Change a user's role to admin/user/pending | Yes — JWT + admin role |
+| `DELETE` | `/api/users/:userId` | Delete a user (with last-admin safeguard) | Yes — JWT + admin role |
 
 ### Role-based access control (active)
 
-The User model supports two roles, enforced via `requireAdmin` middleware from `middleware/auth.js`:
+The User model supports three roles, enforced via `requireAdmin` middleware from `middleware/auth.js`:
 
 | Role | Current permission scope |
 |------|--------------------------|
-| `'admin'` | Full CRUD access to PCs, services, health probes, and user listing (`GET /api/users`) |
+| `'admin'` | Full CRUD access to PCs, services, health probes, and user management (`routes/users.js`) |
 | `'user'` | Read-only access to PCs and services; admin mutation routes (POST/PUT/DELETE) return 403 |
+| `'pending'` | Cannot log in — credentials are accepted but `/login` returns 403 until an admin changes the role via `PUT /api/users/:userId/role` |
 
 Role enforcement is active on the following route groups:
 - `routes/pcs.js` — POST, PUT, DELETE require both `authMiddleware` + `requireAdmin`.
-- `routes/users.js` — GET `/api/users` requires both `authMiddleware` + `requireAdmin`.
+- `routes/users.js` — All endpoints require both `authMiddleware` + `requireAdmin`.
 
 
 ## Architecture overview
@@ -352,9 +450,14 @@ Role enforcement is active on the following route groups:
 ```
 Client request
     │
+    ├─→ Helmet middleware (security headers: CSP, X-Frame-Options, HSTS, etc.)
+    │       Configuration: crossOriginOpenerPolicy: same-origin, xXssProtection: false
+    │
     ├─→ CORS middleware (origin whitelist from CLIENT_URL)
     │
     ├─→ express.json() (body parsing; errors → global 400 handler)
+    │
+    ├─→ globalLimiter (rate limiting on all /api/* routes — 100 req/15 min per IP)
     │
     ├─→ Route-specific validation middleware (routes use it: backend/middleware/validation.js)
     │       │
@@ -411,3 +514,59 @@ The Dockerfile produces a single-stage Node.js 20 Alpine image. In development, 
 ## 🔄 Changes in this update
 
 - **2026-07-12 — Users router registered in `server.js`:** `registerRoutes()` now dynamically imports and mounts a fifth route module: `./routes/users.js` at `/api/users`. It is registered second, between auth (`/api/auth`) and health (`/api/check-health`). Updated the `registerRoutes()` function description to reflect five routers instead of three. Updated the server.js general description accordingly. Added entry in "What exists now" table for the users admin routes.
+
+## 🔄 Changes in this update
+
+- **Security hardening — JWT_SECRET removed from repository:** Hardcoded JWT secret removed from `.env.development` and replaced with `CHANGE_ME` placeholder. Server now performs startup validation (in `server.js`) that rejects `JWT_SECRET` if missing or shorter than 64 characters, and rejects missing `JWT_EXPIRES_IN`. Server exits with code 1 on validation failure.
+- **New file — `.env.example`:** Template file added to the repository with documented placeholders and generation instructions (`openssl rand -base64 48`). Serves as the onboarding reference for setting up environment variables. Full documentation added as a new section.
+- **`.env.development` updated:** `JWT_SECRET` value changed from a hardcoded secret to `CHANGE_ME` placeholder. Documentation updated to reflect that this file is now git-ignored and must be populated from `.env.example` before the server will start.
+- **`.gitignore` updated:** `.env.development` added to the root `.gitignore` exclusion list to prevent accidental credential commits.
+
+---
+
+## 🔄 Changes in this update
+
+- **T5 — Security hardening: .env files moved out of Git tracking:** `backend/.env.development` is now untracked by Git (previously committed with placeholder values). Updated `.env.example` documentation to include the `cp` command from the file's header comment. Updated `.env.development` description to remove "committed copy" reference — it now instructs developers to create the file by copying from `.env.example`.
+
+---
+
+## 🔄 Changes in this update
+
+- **Security hardening — MongoDB authentication enabled:** `server.js` no longer uses a monolithic `MONGODB_URI` environment variable. Instead, a new `buildMongoUri()` function dynamically constructs the connection URI from five component environment variables: `MONGODB_HOST`, `MONGODB_PORT`, `MONGODB_DATABASE`, `MONGODB_USERNAME`, and `MONGODB_PASSWORD`. The function supports two modes: authenticated mode (when username and password are both present, used in Docker Compose) and no-auth mode (when credentials are absent, used for local development without MongoDB auth). A console log message indicates which mode is active at startup.
+- **`.env.example` updated:** `MONGODB_URI` replaced with five component variables (`MONGODB_HOST`, `MONGODB_PORT`, `MONGODB_DATABASE`, `MONGODB_USERNAME`, `MONGODB_PASSWORD`). The template includes Docker Compose defaults and notes that username/password can be left empty for local dev without auth.
+- **`.env.development` updated:** Same structural change — `MONGODB_URI` replaced with component variables. Current values point to the Docker Compose MongoDB instance with `admin` / `changeme_dev_password` credentials.
+- **Configuration table updated:** The server.js configuration table now lists the five MongoDB component variables instead of the single `MONGODB_URI`.
+- **Functions section updated:** Added documentation for `buildMongoUri()` with full parameter and return details.
+
+---
+
+## 🔄 Changes in this update
+
+- **Security hardening — Helmet.js added:** `helmet@^8.0.0` (installed 8.3.0) added to `package.json` production dependencies and imported in `server.js`. The middleware is registered as the **first** middleware in the Express chain, before CORS and `express.json()`. Configuration overrides: `crossOriginOpenerPolicy: { policy: 'same-origin' }` and `xXssProtection: false` (deprecated, explicitly disabled to avoid browser console warnings). Default Helmet headers are active: Content-Security-Policy (CSP), X-Frame-Options, Strict-Transport-Security (HSTS), X-Content-Type-Options, Referrer-Policy, Permissions-Policy, and cross-origin embedding/opener/policy protections. Updated `server.js` description, imports table, dependencies table, and request flow diagram to reflect the new middleware position.
+
+---
+
+## 🔄 Changes in this update
+
+- **Task 3 — Rate limiting infrastructure added:** New production dependency `express-rate-limit@^7.5.0` added to `package.json`. New middleware file `backend/middleware/rateLimit.js` created with three named exports:
+  - **`globalLimiter`** (100 requests / 15 min per IP) — imported in `server.js` and registered at the app level via `app.use('/api', globalLimiter)` after `express.json()` but before route registration. Protects all `/api/*` endpoints from excessive request volume.
+  - **`authLimiter`** (5 requests / 15 min per IP) — applied directly on `POST /register` and `POST /login` in `routes/auth.js` to prevent brute-force credential guessing.
+  - **`healthLimiter`** (10 requests / min per IP) — applied via `router.use()` in `routes/health.js` to prevent health-check abuse.
+- **`server.js` updated:** Added import of `globalLimiter` from `./middleware/rateLimit.js`. Registered `app.use('/api', globalLimiter)` as the fourth middleware in the Express chain (after Helmet, CORS, and JSON body parsing). Updated server.js general description, imports table, and request flow diagram.
+- **`routes/auth.js` updated:** Both `POST /register` and `POST /login` now accept `authLimiter` as middleware before the handler function. Updated routes.md authentication section accordingly.
+- **`routes/health.js` updated:** The health router now has `router.use(healthLimiter)` applied at the top, covering all `/check-health/*` sub-routes. Updated routes.md health section accordingly.
+- **Subfolder description updated:** The middleware folder entry in the subfolders table now mentions the rate-limiting capabilities alongside the existing validation middleware description.
+
+---
+
+## 🔄 Changes in this update
+
+- **Task 21 — TOTP-based 2FA infrastructure added across the backend:**
+  - **`package.json`:** Two new production dependencies installed: `speakeasy@^2.0.0` (TOTP/HOTP generation and timing-safe verification) and `qrcode@^1.5.4` (QR code data URI generation from OTPAuth URLs). Updated the dependencies table accordingly.
+  - **`server.js`:**
+    - Added `cookie-parser` import — required for reading session cookies (`accessToken`, `refreshToken`, `tempAuthSession`) from incoming requests. Registered as Express middleware before body parsing.
+    - Added startup validation for two new environment variables: `JWT_REFRESH_SECRET` (minimum 64 characters) and `JWT_REFRESH_EXPIRES_IN` (must be set). The server now validates four JWT-related secrets/keys total (`JWT_SECRET`, `JWT_EXPIRES_IN`, `JWT_REFRESH_SECRET`, `JWT_REFRESH_EXPIRES_IN`).
+    - Added dynamic import of `./routes/twoFactor.js` in `registerRoutes()` — mounted at `/api/auth/2fa` **before** the general auth router to prevent Express from matching `/auth/2fa/*` against the longer auth route patterns. Six routers are now registered (twoFactor → auth → users → health → services → pcs).
+  - **Authentication infrastructure section:** Completely rewritten to reflect the new two-tier cookie-based session system and TOTP 2FA capabilities. Added a dedicated sequence diagram showing `POST /setup` → QR generation → `POST /verify` → timing-safe verification → token issuance. Updated the "What exists now" table with entries for the RefreshToken model, 2FA routes, and expanded dependency list. Rewrote the active endpoints table to include all five auth endpoints plus four 2FA endpoints across two router modules. Added the `pending` role to the RBAC documentation.
+  - **Models:** Updated User.js fields table (documented in models.md) with `totpSecret` and `totpEnabled` schema additions.
+  - **Routes:** Full documentation for `twoFactor.js` added to routes.md, plus comprehensive auth.js updates covering cookie-based token management, the post-login 2FA intercept flow, `/refresh`, `/logout`, temp session helpers, and shared helper functions duplicated from twoFactor.js.

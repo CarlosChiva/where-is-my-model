@@ -3,8 +3,10 @@ import { isValidObjectId } from 'mongoose';
 import PC from '../models/PC.js';
 import { checkPcServices, checkAllServices } from '../services/healthChecker.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { healthLimiter } from '../middleware/rateLimit.js';
 
 const router = express.Router();
+router.use(healthLimiter);
 
 /* ------------------------------------------------------------------ */
 /*  POST /pcs/:pcId — Health-check services on a single PC             */

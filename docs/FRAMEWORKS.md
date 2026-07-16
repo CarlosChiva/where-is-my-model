@@ -23,6 +23,28 @@
 | Production Web Server | Nginx Alpine | — | ✅ Configured |
 | Fonts | Google Fonts | Spectral + JetBrains Mono | ✅ Loaded |
 
+## Security Dependencies (To Be Added)
+
+| Package | Version | Purpose | Tasks |
+|---------|---------|---------|-------|
+| `express-rate-limit` | ^7.5.0 | Rate limiting | 3 |
+| `helmet` | ^8.0.0 | Security headers | 4, 25 |
+| `cookie-parser` | ^1.4.7 | HTTP-only cookie parsing | 6, 14 |
+| `pino` | ^9.5.0 | Structured logging | 10, 18 |
+| `pino-http` | ^10.0.0 | Express HTTP logger middleware | 10, 18 |
+| `nodemailer` | ^6.9.0 | Email sending | 15 |
+| `speakeasy` | ^2.0.0 | TOTP 2FA | 21 |
+
+## Skills Discovered
+
+| Skill | Source | Relevance |
+|-------|--------|-----------|
+| `docker-best-practices` (built-in) | Built-in | Tasks 11, 13 (Healthchecks, non-root user) |
+| `api-error-handling` (built-in) | Built-in | Tasks 17, 22 (Request ID, audit logging) |
+| `mukul975/anthropic-cybersecurity-skills@hardening-docker-containers-for-production` | skills.sh | Tasks 11, 13 (Docker hardening) |
+| `josiahsiegel/claude-plugin-marketplace@docker-security-guide` | skills.sh | Tasks 7, 8, 13 (Docker security, nginx, TLS) |
+| `bagelhole/devops-security-agent-skills@docker-compose` | skills.sh | Tasks 7, 8, 16 (Compose security) |
+
 ## API Endpoints
 
 | Method | Path | Description | Status |
@@ -31,6 +53,7 @@
 | `POST` | `/api/auth/register` | Register new user (1st = admin) | ✅ |
 | `POST` | `/api/auth/login` | Login → returns JWT | ✅ |
 | `GET` | `/api/auth/me` | Current user profile (JWT decoded) | ✅ |
+| `POST` | `/api/auth/refresh` | Refresh access token | 🔜 Planned (Task 14) |
 | `GET` | `/api/pcs` | List all PCs | ✅ |
 | `GET` | `/api/pcs/:id` | Get single PC | ✅ |
 | `POST` | `/api/pcs` | Create PC | ✅ |
@@ -52,7 +75,12 @@
 ```js
 { userId: String, username: String, role: 'admin'|'user'|'pending' }
 ```
-Signed with `JWT_SECRET`. Stored in `localStorage['token']` on frontend. Pending users never receive a JWT token.
+Signed with `JWT_SECRET`. Currently stored in `localStorage['token']` on frontend. Pending users never receive a JWT token.
+
+### Planned Token Architecture (Post-Task 6+14)
+- **Access token**: 15-minute expiry, httpOnly cookie
+- **Refresh token**: 7-day expiry, httpOnly cookie, separate secret (`JWT_REFRESH_SECRET`)
+- Auto-refresh on 401 via apiClient interceptor
 
 ### Middleware (`backend/middleware/auth.js`)
 - **`authMiddleware`**: Verifies Bearer token, sets `req.user = decoded_payload`
@@ -118,8 +146,53 @@ Signed with `JWT_SECRET`. Stored in `localStorage['token']` on frontend. Pending
 - `MONGODB_URI=mongodb://mongo:27017/where-is-my-model`
 - `CLIENT_URL=http://localhost:3000`
 
+**Backend** (new env vars to be added):
+- `JWT_SECRET` (strong, external)
+- `JWT_REFRESH_SECRET` (Task 14)
+- `ADMIN_USERNAME` (Task 20)
+- `ADMIN_PASSWORD` (Task 20)
+- `MONGO_INITDB_ROOT_USERNAME` (Task 1)
+- `MONGO_INITDB_ROOT_PASSWORD` (Task 1)
+- `HEALTH_CHECK_ALLOWED_NETWORKS` (Task 12)
+
 **Frontend** (`.env` for Docker):
 - `VITE_API_PROXY_TARGET=http://backend:8080`
 
 **Frontend** (`.env.development` for local):
 - `VITE_API_PROXY_TARGET=http://localhost:9003`
+
+## Dependencies and Ordering
+
+### Phase 1: Foundation (Crítico) — Sequential
+```
+Task 2 (JWT_SECRET out of repo) → Task 5 (.env out of repo) → Task 1 (MongoDB auth)
+    ↓
+Task 4 (Helmet.js) → Task 3 (Rate limiting)
+```
+
+### Phase 2: Authentication Hardening (Alto) — Parallel groups
+```
+Group A (Token security): Task 6 (httpOnly cookies) → Task 14 (Refresh tokens) → Task 21 (2FA)
+Group B (Docker security): Task 13 (Non-root user) → Task 11 (Healthchecks)
+Group C (Input/Network): Task 9 (Password strength) → Task 12 (SSRF protection)
+Group D (Observability): Task 10+18 (Logger) → Task 17 (Request ID)
+Group E (Infrastructure): Task 7 (HTTPS/TLS) → Task 8 (CSP+HSTS in nginx)
+```
+
+### Phase 3: Data Integrity (Medio) — Sequential
+```
+Task 20 (Admin seed) → Task 19 (Mongoose transactions) → Task 16 (Backups) → Task 15 (Email verification)
+```
+
+### Phase 4: Compliance (Largo plazo) — Parallel
+```
+Task 22 (Audit logging) depends on: Task 17 (Request ID), Task 10/18 (Logger)
+Task 23 (API versioning) is independent
+Task 24 (Input sanitization) depends on: Task 10/18 (Logger)
+Task 25 (Permissions-Policy) depends on: Task 4 (Helmet)
+```
+
+### Critical Path
+```
+2 → 5 → 1 → 4 → 6 → 14 → 13 → 11 → 10+18 → 17 → 22
+```

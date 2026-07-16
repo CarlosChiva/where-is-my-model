@@ -11,3 +11,11 @@ export function login(username, password) {
 export function getMe() {
   return get('/auth/me');
 }
+
+export function logout() {
+  return post('/auth/logout');
+}
+
+export function refreshToken() {
+  return post('/auth/refresh', {});
+}
