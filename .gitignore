@@ -1,5 +1,8 @@
 .agents
 .env
+.env.development
+.env.local
+.env.production
 dist/
 node_modules/
 skills-lock.json
