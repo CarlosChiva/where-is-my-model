@@ -28,17 +28,17 @@ Single-file Docker Compose orchestration that brings up the entire three-service
 | Service | Image / Build context | Host port | Container port | Depends on | Key configuration |
 |---------|----------------------|-----------|----------------|------------|-------------------|
 | `frontend` | `./frontend` (multi-stage, `development` target) | `3000` → `3000` | Vite dev server + HMR | `backend` (service ready) | Volume mount `./frontend:/app` for live-reload; named volume `/app/node_modules` to avoid host-node-modules conflict; `VITE_API_PROXY_TARGET=http://backend:8080` env var for API proxy |
-| `backend` | `./backend` (Node 20 Alpine) | `9003` → `8080` | Express on port 8080 | `mongo` (`service_healthy`) | Loads `./backend/.env.development`; volume mount `./backend:/app` for live-reload; named volume `/app/node_modules` |
-| `mongo` | `mongo:7` (official) | — (internal only, not exposed to host) | 27017 | — | Health check via `mongosh --eval "db.adminCommand('ping')"` with 10 s interval, 5 s timeout, 5 retries, 10 s start period; persistent volume `mongo-data:/data/db` |
+| `backend` | `./backend` (Node 20 Alpine) | `9003` → `8080` | Express on port 8080 | `mongo` (`service_healthy`) | Loads `./backend/.env.development`; volume mount `./backend:/app` for live-reload; named volume `/app/node_modules`; connects to MongoDB using component env vars (`MONGODB_HOST`, `MONGODB_PORT`, `MONGODB_DATABASE`, `MONGODB_USERNAME`, `MONGODB_PASSWORD`) assembled by `buildMongoUri()` in `server.js` |
+| `mongo` | `mongo:7` (official) | — (internal only, not exposed to host) | 27017 | — | Authentication enabled via `MONGO_INITDB_ROOT_USERNAME=admin` and `MONGO_INITDB_ROOT_PASSWORD=changeme_dev_password`; health check via authenticated `mongosh` connection (`mongodb://admin:***@localhost:27017/admin`) with 10 s interval, 5 s timeout, 5 retries, 10 s start period; persistent volume `mongo-data:/data/db` |
 
 ### Startup ordering guarantee
 
 ```
 Host runs: docker compose up
          │
-         ├── mongo starts → healthcheck polls every 10s until ping succeeds
+         ├── mongo starts → creates admin user (MONGO_INITDB_ROOT_USERNAME/PASSWORD) → healthcheck polls every 10s using authenticated mongosh until ping succeeds
          │
-         └── backend starts once mongo is healthy → loads .env.development → connects to mongodb://mongo:27017/where-is-my-model
+         └── backend starts once mongo is healthy → loads .env.development → buildMongoUri() constructs mongodb://admin:***@mongo:27017/where-is-my-model → connects with authentication
              │
              └── frontend starts once backend is up → Vite dev server on :3000 with API proxy pointing to http://backend:8080
 ```
@@ -61,9 +61,16 @@ Repository-level version-control exclusion list. Prevents sensitive environment 
 |---------|-----------|
 | `.agents/` | Local AI agent tooling configuration — contains skills and agent definitions that should not be versioned |
 | `.env` | Environment variables / secrets that must remain local to each deployment |
+| `.env.development` | Development environment configuration for both backend (`JWT_SECRET`, `MONGODB_URI`, etc.) and frontend (`VITE_API_PROXY_TARGET`) — must not be committed with real values |
+| `.env.local` | Local overrides (future-proofing) — per-developer environment customizations that must never be committed |
+| `.env.production` | Production environment configuration (future-proofing) — deployment-specific secrets that must not be committed |
 | `dist/` | Vite production build output (regenerated on every `npm run build`) |
 | `node_modules/` | Node.js dependencies (installed fresh via `npm install`; not portable across platforms) |
 | `skills-lock.json` | Auto-generated lockfile for agent skill versions — tracked per-environment, not in source control |
+
+### Environment file policy
+
+Both `backend/.env.development` and `frontend/.env.development` are excluded from Git tracking. The reference template `backend/.env.example` is committed to the repository and should be copied to create a local `.env.development` file. This prevents accidental credential commits while preserving an onboarding reference for new developers.
 
 ---
 
@@ -167,12 +174,13 @@ Browser (port 3000)
 │       → PUT /:userId/role (change role)     │
 │                                             │
 └──────────────┬──────────────────────────────┘
-               │  Mongoose connection string:
-               │  mongodb://mongo:27017/where-is-my-model
+               │  Mongoose connection string (built by buildMongoUri()):
+               │  Auth mode (Docker): mongodb://admin:***@mongo:27017/where-is-my-model
+               │  No-auth mode (local dev): mongodb://localhost:27017/where-is-my-model
                ▼
 ┌─────────────────────────────────────────────┐
 │  mongo/ (MongoDB 7 on internal port 27017)   │
-│                                             │
+│       Authentication enabled (admin user)    │
 │  Collection: "pcs"                          │
 │       ├── nombre        (string, server     │
 │       │                 label)               │
@@ -196,7 +204,7 @@ Browser (port 3000)
 
 ### How the pieces fit together
 
-1. **Infrastructure layer** — Docker Compose starts MongoDB first with a health check. Once it pings clean, the backend container launches and connects via `mongodb://mongo:27017/where-is-my-model`. Finally, the frontend Vite dev server starts, configured to proxy all `/api/*` requests to `http://backend:8080`.
+1. **Infrastructure layer** — Docker Compose starts MongoDB first, creating an admin user via `MONGO_INITDB_ROOT_USERNAME` and `MONGO_INITDB_ROOT_PASSWORD`. The health check uses an authenticated `mongosh` connection. Once MongoDB pings clean, the backend container launches, reads component environment variables (`MONGODB_HOST`, `MONGODB_PORT`, `MONGODB_DATABASE`, `MONGODB_USERNAME`, `MONGODB_PASSWORD`) and constructs the connection URI via `buildMongoUri()` in `server.js`, then connects with authentication. Finally, the frontend Vite dev server starts, configured to proxy all `/api/*` requests to `http://backend:8080`.
 
 2. **Data persistence** — Every PC (compute server) is a single MongoDB document in the `pcs` collection. Services running on that server are embedded subdocuments within the parent PC record. No separate services collection exists. The Mongoose `PC` model defines per-GPU VRAM capacity validators that fire both at the schema level and during `.save()`.
 
@@ -248,3 +256,25 @@ Browser (port 3000)
 ## 🔄 Changes in this update
 
 - **T2 — Pending registration flow:** Paragraph #7 under "How the pieces fit together" updated to describe the pending-approval pattern: first user gets admin + JWT, subsequent users get `pending` role and a Spanish confirmation message (no token), requiring explicit admin approval before they can log in.
+
+## 🔄 Changes in this update
+
+- **Security hardening — JWT_SECRET removed from repository:** Hardcoded JWT secret removed from `backend/.env.development`. Replaced with `CHANGE_ME` placeholder. Startup validation added in `server.js` (rejects if `JWT_SECRET` missing or < 64 chars, or `JWT_EXPIRES_IN` missing).
+- **New file — `backend/.env.example`:** Template file committed to the repository with documented placeholders and generation instructions. Serves as the onboarding reference.
+- **`.gitignore` updated:** `.env.development` added to the exclusion list to prevent accidental credential commits. Updated the `.gitignore` documentation table accordingly.
+
+---
+
+## 🔄 Changes in this update
+
+- **T5 — Security hardening: .env files moved out of Git tracking:** Both `backend/.env.development` and `frontend/.env.development` are now untracked by Git. Updated `.gitignore` documentation table to add `.env.local` and `.env.production` patterns for future-proofing. Updated `.env.development` rationale to cover both backend and frontend env files. Added new "Environment file policy" subsection documenting that `backend/.env.example` is the committed template. Updated quick-reference row for authentication system to point to `backend/.env.development` (still accurate — file exists on disk, just not tracked).
+
+---
+
+## 🔄 Changes in this update
+
+- **Security hardening — MongoDB authentication enabled:** The `mongo` service in `docker-compose.yml` now creates a root admin user via `MONGO_INITDB_ROOT_USERNAME=admin` and `MONGO_INITDB_ROOT_PASSWORD=changeme_dev_password`. The health check was updated from an unauthenticated `mongosh --eval "db.adminCommand('ping')"` to an authenticated connection string (`mongodb://admin:***@localhost:27017/admin`).
+- **`docker-compose.yml` composition table updated:** The `mongo` service row now documents authentication configuration and the authenticated health check. The `backend` service row now notes the component-based MongoDB connection via `buildMongoUri()`.
+- **Startup ordering diagram updated:** Reflects admin user creation during MongoDB initialization and authenticated connection from the backend.
+- **Architecture diagram updated:** The Mongoose connection string annotation now shows both auth mode (Docker) and no-auth mode (local dev) URIs, built by `buildMongoUri()`. The MongoDB section notes that authentication is enabled.
+- **"How the pieces fit together" paragraph #1 updated:** Rewritten to describe the full authentication flow: admin user creation, authenticated health check, component-based URI construction, and authenticated MongoDB connection.

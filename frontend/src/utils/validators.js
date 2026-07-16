@@ -108,3 +108,38 @@ export function validateServiceForm(data, services, gpus) {
 
   return { valid: Object.keys(errors).length === 0, errors };
 }
+
+/* ------------------------------------------------------------------ */
+/*  Password strength validation                                      */
+/* ------------------------------------------------------------------ */
+
+const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#])[A-Za-z\d@$!%*?&#]{12,}$/;
+
+/**
+ * Checks if a password meets the complexity requirements.
+ * Returns true only when all four criteria are satisfied (length >= 12,
+ * lowercase, uppercase, digit, special character present).
+ */
+export function isPasswordStrong(password) {
+  return PASSWORD_REGEX.test(password);
+}
+
+/**
+ * Returns a breakdown of which password criteria are met and the overall
+ * strength score (0-4). Used by the client-side strength indicator.
+ *
+ * @param {string} password - The plain-text password to evaluate.
+ * @returns {{ score: number, hasLength: boolean, hasLower: boolean,
+ *             hasUpper: boolean, hasDigit: boolean, hasSpecial: boolean }}
+ */
+export function validatePasswordStrength(password) {
+  const p = typeof password === 'string' ? password : '';
+  const hasLength  = p.length >= 12;
+  const hasLower   = /[a-z]/.test(p);
+  const hasUpper   = /[A-Z]/.test(p);
+  const hasDigit   = /\d/.test(p);
+  const hasSpecial = /[@$!%*?&#]/.test(p);
+  const score = [hasLength, hasLower, hasUpper, hasDigit, hasSpecial]
+    .filter(Boolean).length;
+  return { score, hasLength, hasLower, hasUpper, hasDigit, hasSpecial };
+}

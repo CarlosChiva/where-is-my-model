@@ -2,33 +2,32 @@ import jwt from 'jsonwebtoken';
 
 /* ------------------------------------------------------------------ */
 /*  authMiddleware                                                     */
-/*  Verifies a Bearer token in the Authorization header, decodes it,   */
-/*  and attaches the payload to req.user for downstream middleware     */
-/*  and route handlers. Returns 401 on any authentication failure.     */
+/*  Dual-mode: checks BOTH Bearer token in Authorization header AND   */
+/*  the httpOnly 'accessToken' cookie. Decodes the first valid source  */
+/*  found and attaches the payload to req.user for downstream          */
+/*  middleware and route handlers. Returns 401 on failure.             */
 /* ------------------------------------------------------------------ */
 
 export function authMiddleware(req, res, next) {
-  /* --- Extract Authorization header ----------------------------- */
-  const header = req.headers.authorization;
+  let token = null;
 
-  if (!header) {
-    return res.status(401).json({
-      success: false,
-      message: 'Access denied. No token provided.',
-    });
+  /* --- Method 1: Bearer token from Authorization header ----------- */
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.split(' ')[1];
   }
 
-  /* --- Parse Bearer format -------------------------------------- */
-  const parts = header.split(' ');
-
-  if (parts.length !== 2 || parts[0] !== 'Bearer') {
-    return res.status(401).json({
-      success: false,
-      message: 'Access denied. Invalid token format.',
-    });
+  /* --- Method 2: accessToken cookie ------------------------------- */
+  if (!token && req.cookies && req.cookies.accessToken) {
+    token = req.cookies.accessToken;
   }
 
-  const token = parts[1];
+  if (!token) {
+    return res.status(401).json({
+      success: false,
+      message: 'No token provided',
+    });
+  }
 
   /* --- Verify and decode ---------------------------------------- */
   try {
@@ -36,23 +35,20 @@ export function authMiddleware(req, res, next) {
     req.user = decoded; // contains userId, username, role
     next();
   } catch (err) {
-    if (err instanceof jwt.JsonWebTokenError) {
-      return res.status(401).json({
-        success: false,
-        message: 'Access denied. Invalid token.',
-      });
-    }
-
     if (err instanceof jwt.TokenExpiredError) {
-      return res.status(401).json({
-        success: false,
-        message: 'Access denied. Token expired.',
-      });
+      return res
+        .setHeader('X-Session-Expired', 'true')
+        .status(401)
+        .json({
+          success: false,
+          message: 'Access denied. Token expired.',
+        });
     }
 
+    // Invalid signature or malformed token — not a recovery scenario.
     return res.status(401).json({
       success: false,
-      message: 'Access denied. Token verification failed.',
+      message: 'Access denied. Invalid token.',
     });
   }
 }

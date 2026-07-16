@@ -1,7 +1,7 @@
 # `utils`
 
 > Path: `frontend/src/utils/`
-> Last updated: 2026-06-09
+> Last updated: 2026-07-16
 > Type: Composite folder
 
 General-purpose utility module for the GPU Infrastructure Dashboard frontend. Contains a calculation engine for estimating VRAM requirements when loading LLM models onto GPUs (now orchestrated via a Strategy pattern across 13 attention architectures), shared validation/rounding helpers extracted into their own module to eliminate circular dependencies, GPU visualization colour mapping and per-GPU usage computation, and client-side form validation for PC and Service entities.
@@ -195,7 +195,7 @@ None — entirely self-contained. No external or internal imports.
 
 ### `validators.js`
 
-> Client-side form validation for the two primary data entities managed by the dashboard: **PCs** (servers/GPU nodes) and **Services** (model inference workloads). Each function accepts a data object, checks field-level constraints, and returns an object containing a boolean `valid` flag and a keyed `errors` map with human-readable messages. Both functions are named exports. Imports `getRemainingVram` from `gpuHelpers.js` for per-GPU VRAM capacity checks during service validation.
+> Client-side form validation module covering two domains: (1) data entities managed by the dashboard — **PCs** (servers/GPU nodes) and **Services** (model inference workloads), with field-level constraint checking returning `{ valid, errors }`; and (2) **password strength validation** for the authentication login page, with a boolean pass/fail checker (`isPasswordStrong`) and a granular per-criterion breakdown (`validatePasswordStrength`) that feeds the visual 5-segment strength indicator. Uses the same `PASSWORD_REGEX` pattern as the backend to keep client-side and server-side rules in sync. Imports `getRemainingVram` from `gpuHelpers.js` for per-GPU VRAM capacity checks during service validation.
 
 ### Imports and dependencies
 
@@ -207,7 +207,8 @@ None — entirely self-contained. No external or internal imports.
 
 | Constant | Value | Purpose |
 |----------|-------|---------|
-| `IPV4_PATTERN` | `/^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/` | Regex used to pre-validate the structure of an IPv4 address (four numeric groups separated by dots) before octet-range checking |
+| `IPV4_PATTERN` | `/^(?:[0-9]{1,3}.){3}[0-9]{1,3}$/` | Regex used to pre-validate the structure of an IPv4 address (four numeric groups separated by dots) before octet-range checking |
+| `PASSWORD_REGEX` | `/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#])[A-Za-z\d@$!%*?&#]{12,}$/` | Same regex as the backend (`User.js`, `auth.js`) — enforces minimum 12 characters with at least one lowercase letter, one uppercase letter, one digit, and one special character (`@$!%*?&#`). Shared across client-side validation functions. |
 
 ### Functions
 
@@ -231,8 +232,26 @@ None — entirely self-contained. No external or internal imports.
   - **`gpus`:** Optional. The PC's `gpus[]` array (`[{ name, vram }]`). Used for bounds checking on `assignedGpu` and as input to `getRemainingVram`.
   - **Returns:** `{ valid: boolean, errors: { nombre?: string, puerto?: string, gpu?: string, assignedGpu?: string } }`. `valid` is `true` iff `errors` has zero keys.
 
+- **`isPasswordStrong(password: string) → boolean`**
+  Checks if a password meets the full complexity requirements using the shared `PASSWORD_REGEX`. Returns `true` only when all four criteria are satisfied (length >= 12, lowercase, uppercase, digit, special character present). Used by `LoginPage.jsx` in the `validate()` flow during registration to block submission before sending to the backend.
+  - `password`: The plain-text password string.
+  - **Returns:** `true` if the password passes all complexity checks, `false` otherwise.
+
+- **`validatePasswordStrength(password: string) → { score: number, hasLength: boolean, hasLower: boolean, hasUpper: boolean, hasDigit: boolean, hasSpecial: boolean }`**
+  Returns a granular breakdown of which individual password criteria are met and an overall strength score from 0 to 5 (one point per satisfied criterion). Used by the client-side strength indicator in `LoginPage.jsx` to render a visual 5-segment progress bar during registration. Coerces non-string inputs to empty string for safety.
+  - `password`: The plain-text password to evaluate.
+  - **Returns:** Object with five boolean flags (`hasLength`, `hasLower`, `hasUpper`, `hasDigit`, `hasSpecial`) and a `score` (0–5) computed by filtering truthy values from the boolean array and taking its length.
+
 ## 🔄 Changes in this update
 
 - **`calculatorEngine.js`** — In `REQUIRED_FIELDS_BY_TYPE['HYBRID_MAMBA']`, the field name `'state_size'` was renamed to `'hybrid_state_size'`. This aligns the required-fields validator with the existing parameter name used by `calculateKvCachePerSeqGB()`, ensuring consistency across the public API.
+
+## 🔄 Changes in this update
+
+- **`validators.js` — Added password strength validation functions:**
+  - **Added `PASSWORD_REGEX` constant** — Same regex as backend (`User.js`, `auth.js`): `/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#])[A-Za-z\d@$!%*?&#]{12,}$/`. Ensures client-side and server-side password rules are identical.
+  - **Added `isPasswordStrong(password) → boolean`** — Checks if a password meets all complexity requirements (minimum 12 characters, lowercase, uppercase, digit, special character). Used by LoginPage.jsx in register mode to block form submission before sending invalid credentials to the backend.
+  - **Added `validatePasswordStrength(password) → { score, hasLength, hasLower, hasUpper, hasDigit, hasSpecial }`** — Returns a granular breakdown of which individual criteria are satisfied and an overall score from 0–5 (one point per criterion). Drives the visual 5-segment password strength indicator in LoginPage.jsx during registration.
+  - Updated the file-level description to cover both domains served by this module: entity form validation (PCs, Services) and authentication password validation.
 
 ---

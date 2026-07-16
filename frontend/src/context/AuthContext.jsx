@@ -1,12 +1,11 @@
 import { createContext, useContext, useState, useEffect, useRef } from 'react';
 
-import { login as apiLogin, register as apiRegister, getMe } from '../services/authApi';
+import { login as apiLogin, register as apiRegister, getMe, logout as apiLogout } from '../services/authApi';
 
 const AuthContext = createContext(null);
 
 function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
-  const [token, setToken] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
 
   // Derived — simple boolean expression during render (Vercel rule 5.1).
@@ -15,23 +14,29 @@ function AuthProvider({ children }) {
   // Guard against StrictMode double-mount and circular re-fetches.
   const hasCheckedAuthRef = useRef(false);
 
+  // Stable ref so the event listener closure always sees the latest setters.
+  const onSessionEndedRef = useRef(null);
+  onSessionEndedRef.current = () => {
+    setUser(null);
+    setIsLoading(false);
+  };
+
+  useEffect(() => {
+    const handler = () => {
+      onSessionEndedRef.current?.();
+    };
+    window.addEventListener('auth:session-ended', handler);
+    return () => window.removeEventListener('auth:session-ended', handler);
+  }, []); // Mount-only — ref keeps the callback current.
+
   const loadUser = async () => {
     if (hasCheckedAuthRef.current) return;
     hasCheckedAuthRef.current = true;
 
-    const storedToken = localStorage.getItem('token');
-    if (!storedToken) {
-      setIsLoading(false);
-      return;
-    }
-
-    setToken(storedToken);
+    // Check auth via /me — cookie is sent automatically with credentials: 'include'
     const result = await getMe();
     if (result.error) {
-      // Token is stale or revoked — silent logout.
-      localStorage.removeItem('token');
       setUser(null);
-      setToken(null);
       setIsLoading(false);
       return;
     }
@@ -52,10 +57,7 @@ function AuthProvider({ children }) {
     const result = await apiLogin(username, password);
     if (result.error) return result;
 
-    const { token: newToken, user: newUser } = result.data;
-    localStorage.setItem('token', newToken);
-    setUser(newUser);
-    setToken(newToken);
+    setUser(result.data.user);
     setIsLoading(false);
     return result;
   };
@@ -64,24 +66,26 @@ function AuthProvider({ children }) {
     const result = await apiRegister(username, password);
     if (result.error) return result;
 
-    /* First registration returns a token and logs the user in immediately.*/
-    if (result.data?.token) {
-      const newToken = result.data.token;
-      localStorage.setItem('token', newToken);
+    /* First registration sets a cookie and returns user data immediately. */
+    if (result.data?.user) {
       setUser(result.data.user);
-      setToken(newToken);
       setIsLoading(false);
       return result;
     }
 
-    /* Subsequent registrations create a 'pending' account — no token. */
+    /* Subsequent registrations create a 'pending' account — no session. */
     return { ...result, pending: true };
   };
 
-  const logout = () => {
-    localStorage.removeItem('token');
+  const logout = async () => {
+    await apiLogout();
     setUser(null);
-    setToken(null);
+  };
+
+  /* Forced logout from the auth:session-ended event (bypasses server call). */
+  const forceLogout = () => {
+    setUser(null);
+    setIsLoading(false);
   };
 
   /* ------------------------------------------------------------------ */
@@ -89,7 +93,7 @@ function AuthProvider({ children }) {
   /* ------------------------------------------------------------------ */
 
   return (
-    <AuthContext.Provider value={{ user, token, isAuthenticated, isLoading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, isAuthenticated, isLoading, login, register, logout, forceLogout }}>
       {children}
     </AuthContext.Provider>
   );

@@ -1,7 +1,7 @@
 # `models`
 
 > Path: `backend/models/`
-> Last updated: 2026-07-11
+> Last updated: 2026-07-16 (Task 21 — TOTP 2FA fields)
 > Type: Leaf folder
 
 Mongoose schema definitions for the Express backend. Contains data models that map to MongoDB collections, implementing validation at both field-level and document-level for GPU server infrastructure entities. The single model defined here manages multi-GPU servers with per-GPU VRAM allocation tracking across assigned network services.
@@ -94,6 +94,7 @@ Mongoose model for application authentication. Defines a user entity with passwo
 | Constant | Value | Purpose |
 |----------|-------|---------|
 | `SALT_ROUNDS` | `10` | Number of bcrypt salt rounds used for password hashing |
+| `PASSWORD_REGEX` | `/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#])[A-Za-z\d@$!%*?&#]{12,}$/` | Regex enforcing password complexity: minimum 12 characters with at least one lowercase letter, one uppercase letter, one digit, and one special character (`@$!%*?&#`) |
 
 ### Classes / Schemas
 
@@ -114,12 +115,15 @@ Schema for authenticated users. Each document stores a unique username, a bcrypt
 | Field | Type | Constraints |
 |-------|------|-------------|
 | `username` | `String` | Required, unique, trimmed, minlength 3, maxlength 64. Error messages: *"Username is required."*, *"Username must be at least 3 characters long."*, *"Username must not exceed 64 characters."* |
-| `password` | `String` | Required, minlength 8, `select: false`. Error messages: *"Password is required."*, *"Password must be at least 8 characters long."* |
+| `password` | `String` | Required, minlength 12, custom regex validator (`PASSWORD_REGEX`) enforcing complexity (uppercase, lowercase, digit, special character), `select: false`. Runs before the bcrypt `pre('save')` hook. Error messages: *"Password is required."*, *"Password must be at least 12 characters long."*, *"Password does not meet complexity requirements."* |
 | `role` | `String` | Enum `['admin', 'user', 'pending']`, defaults to `'user'` |
+| `totpSecret` | `String` | Optional, sparse-indexed (indexed only when present), `select: false` — stores the base32 TOTP secret generated during 2FA setup. Excluded from queries by default; must be explicitly requested via `.select('+totpSecret')` |
+| `totpEnabled` | `Boolean` | Defaults to `false` — flag indicating whether two-factor authentication has been verified and activated for this user. Becomes `true` only after a successful TOTP code verification via `POST /api/auth/2fa/verify` |
 
 **Hooks:**
 
-- **`pre('save')`** — Asynchronous pre-save middleware. If the `password` field has not been modified, skips hashing entirely (preserves efficiency on non-password updates). Otherwise: generates a salt using `bcryptjs.genSalt(SALT_ROUNDS)`, hashes the plain-text password via `bcryptjs.hash()`, and stores the result back on the document. Errors are passed to `next(err)` rather than swallowed.
+- **Custom field validator on `password`** — Synchronous validation runs *before* the pre-save hook: `PASSWORD_REGEX.test(v)` is invoked via the schema's `validate.validator` callback. Enforces that the password contains at least 12 characters and includes all four character classes (lowercase, uppercase, digit, special). On failure returns the message *"Password does not meet complexity requirements."* — this acts as a schema-level safety net complementing the route-level guard in `auth.js`.
+- **`pre('save')`** — Asynchronous pre-save middleware that runs *after* schema validation. If the `password` field has not been modified, skips hashing entirely (preserves efficiency on non-password updates). Otherwise: generates a salt using `bcryptjs.genSalt(SALT_ROUNDS)`, hashes the plain-text password via `bcryptjs.hash()`, and stores the result back on the document. Errors are passed to `next(err)` rather than swallowed.
 
 **Instance methods:**
 
@@ -133,6 +137,61 @@ Schema for authenticated users. Each document stores a unique username, a bcrypt
 | `default` | `mongoose.model('User', userSchema, 'users')` | Mongoose model named `'User'`, bound to MongoDB collection `'users'` |
 
 
+## 📄 `RefreshToken.js`
+
+Mongoose model for tracking JWT refresh tokens in a dedicated MongoDB collection. Enables the two-token (short-lived access token + long-lived refresh token) rotation architecture introduced in Task 14. Each issued refresh token is persisted as a document with revocation and expiration metadata, allowing the `/api/auth/refresh` endpoint to verify its validity before issuing new tokens. Bound to the `refreshTokens` collection. Timestamps are enabled automatically.
+
+### Imports and dependencies
+
+| Module | Imported elements | Type |
+|--------|-------------------|------|
+| `mongoose` | `mongoose` (default) | External |
+
+### Classes / Schemas
+
+#### `refreshTokenSchema` *(Mongoose Schema)*
+
+Schema for a persisted refresh-token record. Each document stores the associated user ID, the raw JWT string, an absolute expiration date, and revocation flags. A compound index on `{ userId, revoked, expiresAt }` optimizes queries that look for active tokens belonging to a specific user.
+
+**Schema options:**
+
+| Option | Value | Purpose |
+|--------|-------|---------|
+| `timestamps` | `true` | Automatically adds `createdAt` and `updatedAt` fields to every document |
+
+**Fields:**
+
+| Field | Type | Constraints |
+|-------|------|-------------|
+| `userId` | `mongoose.Schema.Types.ObjectId` | Required, references `'User'`, indexed. Links the refresh token to its owner. |
+| `token` | `String` | Required, unique. Stores the raw JWT string (not a hash) so it can be looked up by value during rotation. |
+| `expiresAt` | `Date` | Required, indexed. Absolute expiration timestamp computed at creation time (`Date.now() + refreshMs`). |
+| `revoked` | `Boolean` | Defaults to `false`, indexed. When set to `true`, the token is no longer valid for rotation. |
+| `revokedAt` | `Date` | Optional. Set when `revoked` transitions to `true`; records the timestamp of revocation. |
+
+**Indexes:**
+
+- Individual indexes on `userId`, `expiresAt`, and `revoked`.
+- Compound index: `{ userId: 1, revoked: 1, expiresAt: -1 }` — optimizes lookups for active tokens by user, sorted newest-first.
+
+**Instance methods:**
+
+- **`isValid() → boolean`**
+  Returns `true` only if the token has not been revoked (`!this.revoked`) AND its expiration date is in the future (`this.expiresAt > new Date()`). Used by the `/api/auth/refresh` handler before issuing rotated tokens.
+
+**Static methods:**
+
+- **`findByToken(tokenValue: string) → Promise<RefreshToken | null>`**
+  Convenience query alias for `this.findOne({ token: tokenValue })`. Called during the refresh flow to look up whether a presented JWT exists in the collection and is still valid.
+
+### Exports
+
+| Export | Type | Description |
+|--------|------|-------------|
+| `default` | `mongoose.model('RefreshToken', refreshTokenSchema, 'refreshTokens')` | Mongoose model named `'RefreshToken'`, bound to MongoDB collection `'refreshTokens'` |
+
+---
+
 ## 🔄 Changes in this update
 
 - **Replaced monolithic `vram` field with multi-GPU `gpus[]` array** — The PC schema previously had a single `vram: Number` field representing the total VRAM capacity of the server. This has been replaced by `gpus: Array<{ name: String, vram: Number }>` which allows defining multiple GPUs per server, each with its own name and VRAM capacity.
@@ -143,3 +202,20 @@ Schema for authenticated users. Each document stores a unique username, a bcrypt
 - **Added optional HTTP health-check fields to `serviceSchema`** — Three new optional fields were added to support a two-layer HTTP health-check system: `endpoint` (String, nullable), `host` (String, nullable), and `protocol` (enum `'http'`/`'https'`, defaults to `'http'`). These allow each service to advertise an external health-check probe URL (`{protocol}://{host}{endpoint}`).
 - **T003 — Added `User.js` model** — New Mongoose schema for application authentication. Defines three fields: `username` (unique, trimmed, 3–64 chars), `password` (required, minlength 8, `select: false` to prevent accidental exposure), and `role` (enum `['admin', 'user']`, defaults to `'user'`). Includes a `pre('save')` hook that hashes the password using `bcryptjs` with 10 salt rounds (skips hashing if password is unmodified). Provides an instance method `comparePassword(plainText)` for login verification. Model is bound to the MongoDB collection `'users'`.
 - **T1 — Extended `role` enum with `'pending'`** — The `role` field in the `User` schema was updated from `['admin', 'user']` to `['admin', 'user', 'pending']`, allowing users to be created in a provisional state before full activation.
+
+## 🔄 Changes in this update
+
+- **Password complexity hardening on `User.js`:**
+  - **Added `PASSWORD_REGEX` constant:** New top-level constant `/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#])[A-Za-z\d@$!%*?&#]{12,}$/` enforcing that passwords contain at least 12 characters with all four character classes: lowercase, uppercase, digit, and special character (`@$!%*?&#`).
+  - **Changed `password.minlength` from 8 to 12:** The minimum length constraint was raised from 8 to 12 characters. Error message updated accordingly.
+  - **Added custom schema validator on `password`:** New `validate: { validator, message }` block using `PASSWORD_REGEX.test(v)`. This runs before the bcrypt `pre('save')` hook — it acts as a second defense layer (the first is the synchronous route guard in `auth.js`). Returns *"Password does not meet complexity requirements."* on failure. This provides multi-layer validation: (1) sync guard in auth route, (2) Mongoose schema validator, (3) client-side indicator in LoginPage.jsx.
+
+## 🔄 Changes in this update
+
+- **Task 14 — Added `RefreshToken.js` model:** New Mongoose schema for the two-token rotation architecture. Each issued refresh token is persisted in a dedicated `refreshTokens` collection with five fields: `userId` (required, ObjectId ref to `'User'`, indexed), `token` (required, unique string storing the raw JWT), `expiresAt` (required, absolute expiration timestamp, indexed), `revoked` (Boolean, defaults `false`, indexed), and `revokedAt` (optional Date). A compound index `{ userId: 1, revoked: 1, expiresAt: -1 }` optimizes lookups for active tokens by user. Provides an instance method `isValid()` returning true only if not revoked AND expiration is in the future, and a static method `findByToken(tokenValue)` as a convenience alias for `findOne({ token })`. Timestamps are enabled automatically. Model is bound to the MongoDB collection `'refreshTokens'`.
+
+## 🔄 Changes in this update
+
+- **Task 21 — Added TOTP 2FA fields to `User.js`:** Two new optional schema fields support time-based one-time password authentication:
+  - **`totpSecret` (String, sparse, `select: false`):** Stores the base32-encoded TOTP secret generated during setup. Sparse indexing means only users with a set value consume index space. Like `password`, this field is excluded from queries by default and must be explicitly projected via `.select('+totpSecret')` when needed (setup, verify, disable flows).
+  - **`totpEnabled` (Boolean, default: `false`):** Flag that transitions to `true` only after a successful TOTP code verification via `POST /api/auth/2fa/verify`. This distinguishes between "secret provisioned but not yet confirmed" (`totpSecret` set, `totpEnabled: false`) and "fully active 2FA" (both fields populated). The login flow in `auth.js` checks this flag to decide whether to intercept with a 403 `2FA_REQUIRED` response.

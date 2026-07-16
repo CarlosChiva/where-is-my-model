@@ -7,6 +7,8 @@ import bcryptjs from 'bcryptjs';
 
 const SALT_ROUNDS = 10;
 
+const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#])[A-Za-z\d@$!%*?&#]{12,}$/;
+
 /* ------------------------------------------------------------------ */
 /*  User schema                                                       */
 /* ------------------------------------------------------------------ */
@@ -24,13 +26,29 @@ const userSchema = new mongoose.Schema(
     password: {
       type: String,
       required: [true, 'Password is required.'],
-      minlength: [8, 'Password must be at least 8 characters long.'],
+      minlength: [12, 'Password must be at least 12 characters long.'],
+      validate: {
+        validator: function (v) {
+          return PASSWORD_REGEX.test(v);
+        },
+        message: 'Password does not meet complexity requirements.',
+      },
       select: false, // Exclude from queries by default
     },
     role: {
       type: String,
       enum: ['admin', 'user', 'pending'],
       default: 'user',
+    },
+    /* --- 2FA fields (optional) ------------------------------------ */
+    totpSecret: {
+      type: String,
+      sparse: true,   // Only indexed when present — keeps unindexed for non-2FA users
+      select: false,  // Never returned in queries by default
+    },
+    totpEnabled: {
+      type: Boolean,
+      default: false,
     },
   },
   {
