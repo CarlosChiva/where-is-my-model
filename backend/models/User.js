@@ -40,6 +40,28 @@ const userSchema = new mongoose.Schema(
       enum: ['admin', 'user', 'pending'],
       default: 'user',
     },
+    /* --- Email verification fields (optional) ---------------------- */
+    email: {
+      type: String,
+      unique: true,
+      sparse: true,
+      trim: true,
+      lowercase: true,
+      match: [/.+@.+\..+/, 'Invalid email address.'],
+    },
+    emailVerified: {
+      type: Boolean,
+      default: false,
+    },
+    emailVerificationToken: {
+      type: String,
+      sparse: true,
+      select: false,
+    },
+    emailVerificationExpires: {
+      type: Date,
+      select: false,
+    },
     /* --- 2FA fields (optional) ------------------------------------ */
     totpSecret: {
       type: String,

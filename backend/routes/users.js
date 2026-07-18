@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import User from '../models/User.js';
 import { authMiddleware, requireAdmin } from '../middleware/auth.js';
 import logger from '../utils/logger.js';
+import { sanitizeMiddleware } from '../middleware/sanitization.js';
 
 const router = express.Router();
 
@@ -29,7 +30,7 @@ router.get('/', authMiddleware, requireAdmin, async (req, res) => {
 /*  PUT /:userId/role — Change user role (admin only)                  */
 /* ------------------------------------------------------------------ */
 
-router.put('/:userId/role', authMiddleware, requireAdmin, async (req, res) => {
+router.put('/:userId/role', authMiddleware, requireAdmin, sanitizeMiddleware, async (req, res) => {
   try {
     /* Validate ObjectId format early */
     if (!mongoose.Types.ObjectId.isValid(req.params.userId)) {
