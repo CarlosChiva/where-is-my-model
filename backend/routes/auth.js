@@ -4,6 +4,7 @@ import User from '../models/User.js';
 import RefreshToken from '../models/RefreshToken.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { authLimiter } from '../middleware/rateLimit.js';
+import logger from '../utils/logger.js';
 
 const router = express.Router();
 
@@ -201,7 +202,7 @@ router.post('/register', authLimiter, async (req, res) => {
       const messages = Object.values(err.errors).map((e) => e.message);
       return res.status(400).json({ success: false, errors: messages });
     }
-    console.error('[auth] POST /register error:', err);
+    logger.error('[auth] POST /register error:', err);
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
@@ -283,7 +284,7 @@ router.post('/login', authLimiter, async (req, res) => {
       user: userProfile(user),
     });
   } catch (err) {
-    console.error('[auth] POST /login error:', err);
+    logger.error('[auth] POST /login error:', err);
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
@@ -341,7 +342,7 @@ router.post('/refresh', authLimiter, async (req, res) => {
 
     res.json({ success: true, message: 'Tokens rotated.' });
   } catch (err) {
-    console.error('[auth] POST /refresh error:', err);
+    logger.error('[auth] POST /refresh error:', err);
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
@@ -363,7 +364,7 @@ router.get('/me', authMiddleware, async (req, res) => {
 
     res.json(userProfile(user));
   } catch (err) {
-    console.error('[auth] GET /me error:', err);
+    logger.error('[auth] GET /me error:', err);
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });

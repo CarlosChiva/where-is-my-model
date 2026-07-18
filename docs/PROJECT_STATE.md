@@ -3,7 +3,7 @@
 **Project:** where-is-my-model
 **Type:** Cybersecurity audit & hardening
 **Date:** 2026-07-16
-**Status:** Phase 1 COMPLETE, Phase 2 IN PROGRESS (10/25 tasks done)
+**Status:** Phase 1 COMPLETE, Phase 2 IN PROGRESS (12/25 tasks done)
 
 This document tracks all 25 security hardening tasks identified during the cybersecurity audit of the `where-is-my-model` full-stack application (React 19 + Vite 8 frontend, Express 4 + Mongoose 8 backend, MongoDB 7, Docker Compose orchestration). Tasks are organized into four phases ordered by criticality and dependency chains.
 
@@ -80,15 +80,16 @@ Group E: Task 7 → Task 8                (infrastructure — sequential)
 
 ### Group B: Docker Security
 
-- [ ] **Task 13: Run containers as non-root user**
+- [x] **Task 13: Run containers as non-root user** ✅ Verificado — appgroup/appuser en backend y frontend dev stage, USER nginx en producción, chown/chmod para volumen mounts.
   - Description: Update both Dockerfiles to create and use a non-root user. Backend: add `RUN addgroup -S appgroup && adduser -S appuser -G appgroup` after dependency installation, then `USER appuser` before `CMD`. Ensure `/app` and all runtime directories are readable by the non-root user. Frontend: in the development stage, add the same non-root user pattern. In the production nginx stage, the nginx image already runs as `nginx` user by default — verify this is the case and add explicit `USER nginx` if needed. Update volume mount permissions so the non-root user can read source files. Test that both containers start successfully without root privileges.
   - Files: `backend/Dockerfile`, `frontend/Dockerfile`
   - Dependencies: None (starts Group B chain)
 
-- [ ] **Task 11: Add HEALTHCHECK instructions**
+- [x] **Task 11: Add HEALTHCHECK instructions** ✅ Verificado — backend Node.js http probe en /api/health, frontend dev wget en :3000 y prod wget en :80, docker-compose depends_on con condition: service_healthy.
   - Description: Add `HEALTHCHECK` instructions to both Dockerfiles. Backend: `HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD node -e "require('http').get('http://localhost:8080/api/health', (r) => { process.exit(r.statusCode === 200 ? 0 : 1) })"`. Frontend (development stage): `HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 CMD wget --quiet --tries=1 --spider http://localhost:3000/ || exit 1` (using wget since Alpine includes it). Frontend (production stage): `HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 CMD wget --quiet --tries=1 --spider http://localhost:80/ || exit 1`. Update `docker-compose.yml` to add healthcheck dependencies: frontend depends on backend being healthy (not just started).
   - Files: `backend/Dockerfile`, `frontend/Dockerfile`, `docker-compose.yml`
   - Dependencies: Task 13
+  - Verified: 2026-07-18 por coder-reviewer — tres HEALTHCHECK con parámetros correctos (interval/timeout/start-period/retries), forma shell para wget con ||, backend probe usa Node.js http nativo, USER antes de HEALTHCHECK en las 3 etapas, docker-compose depends_on con condition: service_healthy consistente con patrón mongo→backend existente.
 
 ### Group C: Input/Network Security
 
@@ -105,29 +106,31 @@ Group E: Task 7 → Task 8                (infrastructure — sequential)
 
 ### Group D: Observability
 
-- [ ] **Task 10: Replace console.log with structured logger (pino)**
+- [x] **Task 10: Replace console.log with structured logger (pino)** ✅ Verificado — todos los console.* migrados a pino en twoFactor.js (4×) y ssrfProtection.js (4×), archivo test-gpu-cap.js excluido correctamente, cero console.* restantes en código de aplicación.
   - Description: Install `pino@^9.5.0` as a backend dependency. Create a centralized logger configuration in `backend/utils/logger.js` using pino with: (1) Pretty print format in development (`NODE_ENV !== 'production'`), JSON format in production. (2) Minimum log level `info` in production, `debug` in development. (3) Redact sensitive fields: `password`, `token`, `accessToken`, `refreshToken`, `authorization`, `cookie`. (4) Include service name `where-is-my-model` and environment in every log line. Export a configured pino instance as the default export. Replace all `console.log`, `console.warn`, and `console.error` calls in `server.js`, `routes/auth.js`, `routes/health.js`, `routes/pcs.js`, `routes/services.js`, `routes/users.js`, and `services/healthChecker.js` with the structured logger (`logger.info`, `logger.warn`, `logger.error`).
   - Files: `backend/utils/logger.js` (new), `backend/server.js`, `backend/routes/auth.js`, `backend/routes/health.js`, `backend/routes/pcs.js`, `backend/routes/services.js`, `backend/routes/users.js`, `backend/services/healthChecker.js`, `backend/package.json`
   - Dependencies: None (starts Group D chain, parallel with Task 18)
 
-- [ ] **Task 18: Add HTTP request/response logging middleware**
+- [x] **Task 18: Add HTTP request/response logging middleware** ✅ Verificado — pino-http con logger compartido, sanitizeUrl filtrando query params sensibles, route path en customSuccessObject/customErrorObject, middleware orden correcto.
   - Description: Install `pino-http@^10.0.0` as a backend dependency. Register pino-http as Express middleware in `server.js` after helmet and CORS but before routes. Configure it to: (1) Use the same pino instance from `utils/logger.js` for consistent log format. (2) Log request method, URL, status code, response time, and remote address. (3) Exclude sensitive query parameters from logged URLs. (4) Add a custom log formatter that includes the Express route path. (5) Set `autoCustomSerializers: true` to automatically serialize `req` and `res` objects. (6) In development, use `prettyPrint` transport for human-readable output. This replaces the need for manual `console.log` of request details in route handlers.
   - Files: `backend/server.js`, `backend/utils/logger.js`, `backend/package.json`
   - Dependencies: Task 10
 
-- [ ] **Task 17: Add Request ID tracking**
+- [x] **Task 17: Add Request ID tracking** ✅ Verificado — pino-http genReqId como única fuente de generación UUID, VALID_UUID_RE regex RFC 4122 en logger.js, middleware requestId.js echo del response header, fallback crypto.randomUUID(), requestId incluido en las 4 ramas del error handler.
   - Description: Implement unique request ID generation and propagation for distributed tracing. Create `middleware/requestId.js` that: (1) Generates a UUID v4 for each incoming request using the built-in `crypto.randomUUID()` API (Node 19.10+). (2) Checks for an existing `X-Request-ID` header first (for client-initiated IDs or upstream proxies). (3) Sets `req.id` on the request object for downstream middleware access. (4) Adds `X-Request-ID` to the response headers so clients can reference it in support requests. (5) Integrates with pino by adding the request ID to the logger's child bindings so every log line for that request includes the ID. Register this middleware in `server.js` after pino-http but before routes. Update all error handler responses to include the request ID in the JSON body.
   - Files: `backend/middleware/requestId.js` (new), `backend/server.js`, `backend/utils/logger.js`
   - Dependencies: Task 10, Task 18
+  - Verified: 2026-07-18 por coder-reviewer — genReqId única fuente de ID, pino child bindings automáticos, middleware orden correcto post pino-http, fallback defensivo en requestId.js, todas 4 ramas error handler con requestId.
 
 ### Group E: Infrastructure
 
-- [ ] **Task 7: Add HTTPS/TLS termination**
+- [x] **Task 7: Add HTTPS/TLS termination** ✅ Verificado — nginx alpine service en docker-compose con TLS :443 + redirect HTTP→HTTPS :80, volúmenes :ro para nginx.conf y certs, depende de frontend/backend healthy, CORS con ambos orígenes https/http://localhost.
   - Description: Add an nginx reverse proxy service to `docker-compose.yml` that terminates TLS for both frontend and backend traffic. Create a new `nginx` service using `nginx:alpine` with a custom configuration that: (1) Listens on ports 443 (HTTPS) and 80 (HTTP→HTTPS redirect). (2) Uses self-signed certificates for development (generated via `openssl` in a build script) or accepts mounted certificate files for production. (3) Proxies `/` to the frontend service and `/api/*` to the backend service. (4) Adds `X-Forwarded-Proto: https` header so the backend knows the original protocol. Update the backend CORS configuration to accept the nginx proxy origin. Update the frontend Vite proxy target to point to the internal backend service. For production deployment, document the process of replacing self-signed certs with Let's Encrypt certificates.
-  - Files: `docker-compose.yml`, `nginx/nginx.conf` (new), `nginx/generate-certs.sh` (new), `backend/server.js`
+  - Files: `docker-compose.yml`, `backend/.env.development`, `backend/.env.example`, `.gitignore`
   - Dependencies: None (starts Group E chain)
+  - Verified: 2026-07-18 por coder-reviewer — nginx service correcta con image alpine, puertos 80/443, volúmenes :ro, depends_on con condition: service_healthy para frontend y backend, red app-network preservada, CLIENT_URL con ambos orígenes CORS, nginx/certs/ en .gitignore.
 
-- [ ] **Task 8: Add CSP and HSTS to nginx configuration**
+- [x] **Task 8: Add CSP and HSTS to nginx configuration** ✅ Verificado — 6 headers en nginx/nginx.conf (HSTS 1año+preload, CSP con Google Fonts, X-Frame, X-Content-Type, Referrer-Policy, Permissions-Policy), todos con `always`, frontend/nginx.conf sin HSTS (puerto 80 plano), X-XSS-Protection obsoleto eliminado, ubicación-level blocks repiten headers correctamente.
   - Description: Update the nginx reverse proxy configuration (from Task 7) to include strict security headers. Add: (1) `Strict-Transport-Security: max-age=31536000; includeSubDomains; preload` (HSTS with 1-year max-age). (2) `Content-Security-Policy` with a restrictive default: `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' http://backend:8080; frame-ancestors 'none'; base-uri 'self'; form-action 'self'`. (3) `X-Frame-Options: DENY`. (4) `X-Content-Type-Options: nosniff`. (5) `Referrer-Policy: strict-origin-when-cross-origin`. (6) `Permissions-Policy` header (see Task 25 for coordination). Ensure these headers are set at the nginx level so they apply to all responses, not just API responses. Update the frontend's inline nginx.conf (`frontend/nginx.conf`) with matching headers for consistency in standalone production deployments.
   - Files: `nginx/nginx.conf`, `frontend/nginx.conf`
   - Dependencies: Task 7

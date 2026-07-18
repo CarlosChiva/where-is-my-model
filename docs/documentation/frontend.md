@@ -209,9 +209,18 @@ Three-stage Docker image definition for the frontend application: development (N
 
 | Stage name | Base image | Layer sequence | Notes |
 |------------|-----------|----------------|-------|
-| **development** | `node:20-alpine` | 1) COPY `package*.json`, RUN `npm ci` (deterministic install, cached layer) → 2) COPY `.` (full source) → 3) EXPOSE 3000, CMD `npm run dev -- --host` | In Docker Compose, a volume mount overlays the app directory with live host source for HMR |
+| **development** | `node:20-alpine` | 1) COPY `package*.json`, RUN `npm ci` (deterministic install, cached layer) → 2) COPY `.` (full source) → 3) HEALTHCHECK wget on :3000 → 4) EXPOSE 3000, CMD `npm run dev -- --host` | In Docker Compose, a volume mount overlays the app directory with live host source for HMR |
 | **build** | `node:20-alpine` | Same dependency + source pattern as development → RUN `npm run build` (produces `dist/`) | Includes all devDependencies (needed by Vite to compile) |
-| **production** | `nginx:alpine` | 1) COPY built `dist/` from build stage into `/usr/share/nginx/html` → 2) COPY `nginx.conf` as nginx default config → 3) EXPOSE 80 | Lightweight runtime image — no Node.js, no source code. CMD inherited from nginx base image |
+| **production** | `nginx:alpine` | 1) COPY built `dist/` from build stage into `/usr/share/nginx/html` → 2) COPY `nginx.conf` as nginx default config → 3) EXPOSE 80 → 4) HEALTHCHECK wget on :80 | Lightweight runtime image — no Node.js, no source code. CMD inherited from nginx base image |
+
+### Health checks
+
+Each stage that runs a web server (development and production) has its own `HEALTHCHECK` directive using BusyBox `wget --spider`:
+
+| Stage | Command | Target URL | Interval | Timeout | Start period | Retries | Notes |
+|-------|---------|------------|----------|---------|-------------|---------|-------|
+| **development** | `wget --quiet --tries=1 --spider http://localhost:3000/ \|\| exit 1` | Vite dev server on port 3000 | 30s | 5s | 15s | 3 | Longer start-period (15s) accounts for npm install + Vite's first-compile time. Not consumed by Compose (nothing depends on the frontend being healthy), but useful for Docker lifecycle management |
+| **production** | `wget --quiet --tries=1 --spider http://localhost:80/ \|\| exit 1` | nginx on port 80 | 30s | 5s | 5s | 3 | Shorter start-period (5s) — nginx starts near-instantly. Runs as the `nginx` user. Not used by Compose (Compose only targets the `development` stage) but valuable for standalone production container management |
 
 ### Key behaviours
 - `--host` flag on the dev server is **mandatory** inside containers: binds to `0.0.0.0` instead of `127.0.0.1`, allowing Docker Compose networking to reach Vite's HMR WebSocket endpoint.
@@ -242,13 +251,18 @@ SPA entry HTML document that Vite uses as the application shell. Contains metada
 
 Nginx reverse-proxy and static-file-serving configuration used by the production Docker stage. Serves the compiled Vite SPA on port 80, proxies `/api/*` requests to the backend Express service at `http://backend:8080/api`, and handles SPA fallback routing. No classes or functions — declarative Nginx config syntax.
 
-### Security headers (applied globally and repeated in locations with their own `add_header` directives)
+### Security headers (Task 8 — applied globally and repeated in locations with their own `add_header` directives)
+
+> **Note:** No HSTS header on this server — it runs on plain HTTP (port 80) with TLS termination at the edge nginx. Adding HSTS here would cause browsers to preload a potentially insecure path. A comment block in the config documents this rationale.
+> All security headers use the `always` flag so they apply to every response status code. In location blocks that define their own `add_header` directives (static-asset and index.html locations), nginx overwrites inherited headers — so the security headers must be repeated verbatim in each such block.
 
 | Header | Value | Purpose |
 |--------|-------|---------|
-| `X-Frame-Options` | `DENY always` | Prevents clickjacking (page cannot be embedded in an iframe) |
+| `Content-Security-Policy` | `"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob:; font-src 'self' https://fonts.gstatic.com; connect-src 'self' http://backend:8080; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" always` | Restricts resource loading origins — no `ws:` scheme here (HTTP-only server doesn't proxy HMR WebSockets; that's handled by the edge nginx). Replaced deprecated `X-XSS-Protection`. |
+| `X-Frame-Options` | `DENY always` | Prevents clickjacking (page cannot be embedded in an iframe) — defense-in-depth alongside CSP's `frame-ancestors 'none'` |
 | `X-Content-Type-Options` | `nosniff always` | Blocks MIME-type sniffing |
-| `X-XSS-Protection` | `"1; mode=block" always` | Legacy XSS filter for older browsers |
+| `Referrer-Policy` | `"strict-origin-when-cross-origin" always` | Sends full referrer on same-origin navigation; only origin on cross-origin; nothing when downgrading to HTTP |
+| `Permissions-Policy` | `"camera=(), microphone=(), geolocation=(), payment=(), usb=(), magnetometer=(), gyroscope=(), accelerometer=(), fullscreen=(self)" always` | Disables all device sensor and payment APIs; allows fullscreen only from same origin |
 
 ### Gzip compression
 
@@ -304,3 +318,23 @@ Environment file loaded by Vite during local development and Docker dev builds. 
 ## 🔄 Changes in this update
 
 - **T5 — Security hardening: .env files moved out of Git tracking:** `frontend/.env.development` is now untracked by Git. Updated the `.env.development` section to note that the file is excluded from Git and must be created manually or copied from a local template.
+
+---
+
+## 🔄 Changes in this update
+
+- **Task 11 — HEALTHCHECK directives added to frontend Dockerfile:**
+  - **Development stage:** Health check using `wget --quiet --tries=1 --spider http://localhost:3000/` with 30s interval, 5s timeout, 15s start-period (longer start period to accommodate npm install + Vite's first-compile time), and 3 retries. Runs as non-root `appuser`.
+  - **Production stage:** Health check using `wget --quiet --tries=1 --spider http://localhost:80/` with 30s interval, 5s timeout, 5s start-period (nginx starts near-instantly), and 3 retries. Runs as the `nginx` user`.
+  - **Stage overview table updated:** Both development and production stage rows now note their respective HEALTHCHECK steps in the layer sequence column.
+  - **New "Health checks" section added:** Two-row comparison table showing both directives' parameters, target URLs, and lifecycle behavior.
+
+---
+
+## 🔄 Changes in this update
+
+- **Task 8 — Security headers upgraded in `frontend/nginx.conf`:**
+  - Replaced deprecated `X-XSS-Protection` header with a full `Content-Security-Policy` directive (same policy as the edge nginx but without `ws://backend:8080` in `connect-src` since this HTTP-only server does not proxy HMR WebSockets).
+  - Added `Referrer-Policy "strict-origin-when-cross-origin"` and `Permissions-Policy` with all device sensors disabled except `fullscreen=(self)`.
+  - Added explanatory comment block documenting why HSTS is deliberately omitted on this port-80 server (TLS termination occurs at the edge nginx).
+  - Header replication pattern updated: all three location blocks that have their own `add_header` directives now repeat the full security header set verbatim (nginx overwrites, not appends).

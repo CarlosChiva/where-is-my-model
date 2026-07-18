@@ -10,7 +10,9 @@ import cors from 'cors';
 import express from 'express';
 import helmet from 'helmet';
 import mongoose from 'mongoose';
+import requestId from './middleware/requestId.js';
 import { globalLimiter } from './middleware/rateLimit.js';
+import logger, { createHttpLogger } from './utils/logger.js';
 
 /* ------------------------------------------------------------------ */
 /*  Configuration                                                     */
@@ -27,10 +29,10 @@ function buildMongoUri() {
   const pass = process.env.MONGODB_PASSWORD;
 
   if (user && pass) {
-    console.log('[server] ✓ MongoDB: authenticated mode');
+    logger.info('MongoDB: authenticated mode');
     return `mongodb://${user}:${pass}@${host}:${port}/${db}`;
   }
-  console.log('[server] ⚠ MongoDB: no-auth mode (local dev)');
+  logger.info('MongoDB: no-auth mode (local dev)');
   return `mongodb://${host}:${port}/${db}`;
 }
 
@@ -46,31 +48,31 @@ const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
 const JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN;
 
 if (!JWT_SECRET || JWT_SECRET.length < 64) {
-  console.error(
-    '[server] ✗ JWT_SECRET is not set or is too short (minimum 64 characters). ' +
+  logger.error(
+    'JWT_SECRET is not set or is too short (minimum 64 characters). ' +
     'Generate one with: openssl rand -base64 48'
   );
   process.exit(1);
 }
 
 if (!JWT_EXPIRES_IN) {
-  console.error(
-    '[server] ✗ JWT_EXPIRES_IN is not set. Default: 15m'
+  logger.error(
+    'JWT_EXPIRES_IN is not set. Default: 15m'
   );
   process.exit(1);
 }
 
 if (!JWT_REFRESH_SECRET || JWT_REFRESH_SECRET.length < 64) {
-  console.error(
-    '[server] ✗ JWT_REFRESH_SECRET is not set or is too short (minimum 64 characters). ' +
+  logger.error(
+    'JWT_REFRESH_SECRET is not set or is too short (minimum 64 characters). ' +
     'Generate one with: openssl rand -base64 48'
   );
   process.exit(1);
 }
 
 if (!JWT_REFRESH_EXPIRES_IN) {
-  console.error(
-    '[server] ✗ JWT_REFRESH_EXPIRES_IN is not set. Default: 7d'
+  logger.error(
+    'JWT_REFRESH_EXPIRES_IN is not set. Default: 7d'
   );
   process.exit(1);
 }
@@ -94,6 +96,16 @@ app.use(
 
 const allowedOrigins = CLIENT_URL.split(',').map(u => u.trim());
 app.use(cors({ origin: allowedOrigins, credentials: true }));
+
+/* ------------------------------------------------------------------ */
+/*  HTTP request/response logging (pino-http)                         */
+/*  Registered after helmet + CORS to ensure security headers and     */
+/*  origin checks are applied first. Uses the shared pino instance    */
+/*  for consistent log format across all application output.         */
+/* ------------------------------------------------------------------ */
+app.use(createHttpLogger());
+app.use(requestId); // Task 17: request ID tracing (after pino-http so req.id is populated)
+
 app.use(cookieParser());
 app.use(express.json());
 app.use('/api', globalLimiter);
@@ -121,10 +133,10 @@ async function registerRoutes() {
   try {
     const twoFactorModule = await import('./routes/twoFactor.js');
     app.use('/api/auth/2fa', twoFactorModule.default);
-    console.log('[server] ✓ TwoFactor router registered at /api/auth/2fa');
+    logger.info('TwoFactor router registered at /api/auth/2fa');
   } catch {
-    console.warn(
-      '[server] ⚠ TwoFactor router not found — ' +
+    logger.warn(
+      'TwoFactor router not found — ' +
       '/api/auth/2fa endpoints unavailable (create routes/twoFactor.js)'
     );
   }
@@ -132,10 +144,10 @@ async function registerRoutes() {
   try {
     const authModule = await import('./routes/auth.js');
     app.use('/api/auth', authModule.default);
-    console.log('[server] ✓ Auth router registered at /api/auth');
+    logger.info('Auth router registered at /api/auth');
   } catch {
-    console.warn(
-      '[server] ⚠ Auth router not found — ' +
+    logger.warn(
+      'Auth router not found — ' +
       '/api/auth endpoints unavailable (create routes/auth.js)'
     );
   }
@@ -143,10 +155,10 @@ async function registerRoutes() {
   try {
     const usersModule = await import('./routes/users.js');
     app.use('/api/users', usersModule.default);
-    console.log('[server] ✓ Users router registered at /api/users');
+    logger.info('Users router registered at /api/users');
   } catch {
-    console.warn(
-      '[server] ⚠ Users router not found — ' +
+    logger.warn(
+      'Users router not found — ' +
       '/api/users endpoints unavailable (create routes/users.js)'
     );
   }
@@ -154,10 +166,10 @@ async function registerRoutes() {
   try {
     const healthModule = await import('./routes/health.js');
     app.use('/api/check-health', healthModule.default);
-    console.log('[server] ✓ Health router registered at /api/check-health');
+    logger.info('Health router registered at /api/check-health');
   } catch {
-    console.warn(
-      '[server] ⚠ Health router not found — ' +
+    logger.warn(
+      'Health router not found — ' +
       '/api/check-health endpoints unavailable (create routes/health.js)'
     );
   }
@@ -165,10 +177,10 @@ async function registerRoutes() {
   try {
     const servicesModule = await import('./routes/services.js');
     app.use('/api/pcs/:pcId/services', servicesModule.default);
-    console.log('[server] ✓ Services router registered at /api/pcs/:pcId/services');
+    logger.info('Services router registered at /api/pcs/:pcId/services');
   } catch {
-    console.warn(
-      '[server] ⚠ Services router not found — ' +
+    logger.warn(
+      'Services router not found — ' +
       '/api/pcs/:pcId/services endpoints unavailable (create routes/services.js)'
     );
   }
@@ -176,10 +188,10 @@ async function registerRoutes() {
   try {
     const pcsModule = await import('./routes/pcs.js');
     app.use('/api/pcs', pcsModule.default);
-    console.log('[server] ✓ PCs router registered at /api/pcs');
+    logger.info('PCs router registered at /api/pcs');
   } catch {
-    console.warn(
-      '[server] ⚠ PCs router not found — ' +
+    logger.warn(
+      'PCs router not found — ' +
       '/api/pcs endpoints unavailable (create routes/pcs.js)'
     );
   }
@@ -192,9 +204,9 @@ async function registerRoutes() {
 async function start() {
   try {
     await mongoose.connect(MONGODB_URI);
-    console.log('[server] ✓ Connected to MongoDB');
+    logger.info('Connected to MongoDB');
   } catch (err) {
-    console.error('[server] ✗ MongoDB connection failed:', err.message);
+    logger.error('[server] MongoDB connection failed:', err.message);
     process.exit(1);
   }
 
@@ -208,36 +220,46 @@ async function start() {
   app.use((err, req, res, _next) => {
     // JSON parse errors from express.json() middleware
     if (err.type === 'entity.parse.failed' || err instanceof SyntaxError) {
-      console.warn(`[server] ⚠ JSON parse error: ${err.message}`);
+      logger.warn('JSON parse error: %s', err.message);
       return res.status(400).json({
         success: false,
         message: 'Invalid JSON in request body.',
+        requestId: req.id,
       });
     }
 
     // Mongoose CastError — invalid ObjectId in URL parameters
     if (err.name === 'CastError') {
-      console.warn(`[server] ⚠ Invalid ${err.path}: ${err.value}`);
+      logger.warn('Invalid %s: %s', err.path, err.value);
       return res.status(400).json({
         success: false,
         message: `Invalid value for parameter "${err.path}".`,
+        requestId: req.id,
       });
     }
 
     // Mongoose ValidationError — schema-level validation failure
     if (err.name === 'ValidationError') {
       const messages = Object.values(err.errors).map((e) => e.message);
-      console.warn(`[server] ⚠ Validation error:`, messages);
-      return res.status(400).json({ success: false, errors: messages });
+      logger.warn('Validation error:', messages);
+      return res.status(400).json({
+        success: false,
+        errors: messages,
+        requestId: req.id,
+      });
     }
 
     // Anything else — log and return 500
-    console.error('[server] ✗ Unhandled error:', err);
-    res.status(500).json({ success: false, message: 'Internal server error' });
+    logger.error('Unhandled error:', err);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      requestId: req.id,
+    });
   });
 
   app.listen(PORT, () => {
-    console.log(`[server] ✓ Listening on port ${PORT}`);
+    logger.info('Listening on port %d', PORT);
   });
 }
 

@@ -1,5 +1,6 @@
 import dns from 'node:dns/promises';
 import ipaddr from 'ipaddr.js';
+import logger from '../utils/logger.js';
 
 /* ------------------------------------------------------------------ */
 /*  SSRF — Server-Side Request Forgery protection                    */
@@ -63,7 +64,7 @@ function parseAllowlist() {
           ipaddr.parse(addr); // validates addr is valid IPv4 or IPv6
           return [addr, Number.parseInt(prefixStr, 10)];
         } catch {
-          console.warn(`[ssrf] invalid CIDR in allowlist: "${cidr}" — skipping`);
+          logger.warn('[ssrf] invalid CIDR in allowlist: "%s" — skipping', cidr);
           return null;
         }
       })
@@ -145,21 +146,18 @@ export async function resolveAndValidate(host) {
     const validation = validateIp(ip);
 
     if (!validation.allowed) {
-      console.warn(
-        `[ssrf] BLOCKED host="${host}" resolved_ip="${ip}" reason="${validation.reason}"`
+      logger.warn(
+        '[ssrf] BLOCKED host="%s" resolved_ip="%s" reason="%s"', host, ip, validation.reason
       );
     } else {
-      /* Verbose debug in non-production environments                */
-      if (process.env.NODE_ENV !== 'production') {
-        console.log(`[ssrf] OK     host="${host}" → "${ip}"`);
-      }
+      logger.debug('[ssrf] OK     host="%s" → "%s"', host, ip);
     }
 
     return { allowed: validation.allowed, ip, reason: validation.reason };
   } catch (err) {
     const code = err.code ?? 'DNS_UNKNOWN';
-    console.warn(
-      `[ssrf] DNS FAIL host="${host}" error="${code} — ${err.message}"`
+    logger.warn(
+      '[ssrf] DNS FAIL host="%s" error="%s — %s"', host, code, err.message
     );
     return { allowed: false, reason: `dns resolution failed: ${code}` };
   }

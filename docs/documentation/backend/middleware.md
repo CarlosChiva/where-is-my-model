@@ -1,7 +1,7 @@
 # `middleware`
 
 > Path: `backend/middleware/`
-> Last updated: 2026-07-16
+> Last updated: 2026-07-18 (Task 17 — Add Request ID tracking)
 > Type: Leaf folder
 
 Request validation middleware for the Express backend. Provides middleware functions used as route handlers on PC creation/update and service creation/update endpoints. All validators follow a collect-all-errors pattern (rather than fail-fast) and return a single 400 response with an `errors` array when validation fails. A legacy fallback auto-transforms a scalar `vram` field into the new `gpus` array format for backward compatibility. Also includes rate-limiting middleware via `express-rate-limit` v7 to protect against abuse — three distinct limiters target the global API surface, authentication endpoints, and health-check probes respectively.
@@ -137,6 +137,7 @@ Server-Side Request Forgery (SSRF) protection module. Resolves hostnames to IP a
 |--------|-------------------|------|
 | `node:dns/promises` | `dns` (namespace) | External (Node.js built-in) |
 | `ipaddr.js` | `ipaddr` (default) | External |
+| `../utils/logger.js` | `logger` (default) | Internal |
 
 ### Constants
 
@@ -147,7 +148,7 @@ Server-Side Request Forgery (SSRF) protection module. Resolves hostnames to IP a
 ### Functions
 
 - **`parseAllowlist() → Array<[string, number]> | null`**
-  Parses the `HEALTH_CHECK_ALLOWED_NETWORKS` environment variable into a list of `[ipAddress, prefixLength]` tuples managed by `ipaddr.js`. Returns `null` when the env var is empty or unset (meaning allowlist is inactive and only the denylist applies). Results are memoized on `parseAllowlist._cached` at module scope after first parse. Invalid CIDR entries are skipped with a console warning.
+  Parses the `HEALTH_CHECK_ALLOWED_NETWORKS` environment variable into a list of `[ipAddress, prefixLength]` tuples managed by `ipaddr.js`. Returns `null` when the env var is empty or unset (meaning allowlist is inactive and only the denylist applies). Results are memoized on `parseAllowlist._cached` at module scope after first parse. Invalid CIDR entries are skipped with a `logger.warn('[ssrf] invalid CIDR in allowlist: "%s" — skipping', cidr)`.
   - **Returns:** An array of `[string, number]` tuples for each valid CIDR range, or `null` if allowlist is disabled.
 
 - **`validateIp(ip: string) → { allowed: boolean, reason?: string }`** *(exported)*
@@ -156,10 +157,43 @@ Server-Side Request Forgery (SSRF) protection module. Resolves hostnames to IP a
   - **Returns:** Object with `allowed` boolean and an optional `reason` string explaining the denial.
 
 - **`resolveAndValidate(host: string) → Promise<{ allowed: boolean, ip?: string, reason?: string }>`** *(exported)*
-  Resolves a hostname to its IP address using Node.js `dns.lookup()` and immediately validates that IP. This is the primary public entry point intended to be called by `healthChecker.js` before opening any socket or fetch connection. DNS resolution results are not cached, so re-resolution happens fresh every time (DNS rebinding mitigation). Logs warnings for blocked hosts and debug output in non-production environments.
+  Resolves a hostname to its IP address using Node.js `dns.lookup()` and immediately validates that IP. This is the primary public entry point intended to be called by `healthChecker.js` before opening any socket or fetch connection. DNS resolution results are not cached, so re-resolution happens fresh every time (DNS rebinding mitigation). When a host is blocked, logs via `logger.warn('[ssrf] BLOCKED host="%s" resolved_ip="%s" reason="%s"', ...)`. On DNS failure, logs `logger.warn('[ssrf] DNS FAIL host="%s" error="%s — %s"', ...)`. Successful resolutions are logged at debug level: `logger.debug('[ssrf] OK     host="%s" → "%s"', ...)` — these appear only when pino's log level is set to debug or lower (controlled by pino's built-in level system, no manual `NODE_ENV` guard needed).
   - `host`: A hostname or literal IP address string. Returns `{ allowed: false }` if empty or falsy.
   - **Returns:** Promise resolving to `{ allowed: boolean, ip?: string, reason?: string }`. On success, includes the resolved `ip`. On DNS failure, returns `{ allowed: false, reason: "dns resolution failed: <code>" }`.
 
 ## 🔄 Changes in this update
 
 - **Task 12 — SSRF protection (`ssrfProtection.js`) added:** New module providing two exported functions for outbound connection safety. `validateIp()` checks an IP address against a hard denylist of 14 CIDR ranges covering loopback, private, link-local, documentation, and reserved addresses. Optionally enforces a whitelist via the `HEALTH_CHECK_ALLOWED_NETWORKS` env var (parsed by `parseAllowlist()` with memoization). `resolveAndValidate()` resolves a hostname to its IP via Node.js built-in `dns/promises`, validates it through `validateIp()`, and returns the resolved IP so callers can connect to the IP directly (preventing DNS rebinding attacks where the hostname resolves differently between validation and connection time). New dependency `ipaddr.js@^2.2.0` added to `package.json` for CIDR matching arithmetic.
+
+---
+
+## 🔄 Changes in this update
+
+- **Task 10 — Replaced console.log with structured logger pino:** Added import for `../utils/logger.js` (`logger`). Three `console.warn()` calls and one `console.log()` call have been replaced with pino's sprintf-style format strings:
+  - `parseAllowlist()`: Invalid CIDR entries now log via `logger.warn('[ssrf] invalid CIDR in allowlist: "%s" — skipping', cidr)` instead of `console.warn()`.
+  - `resolveAndValidate()`: Blocked hosts log via `logger.warn('[ssrf] BLOCKED host="%s" resolved_ip="%s" reason="%s"', ...)` instead of `console.warn()`. DNS failures log via `logger.warn('[ssrf] DNS FAIL host="%s" error="%s — %s"', ...)` instead of `console.warn()`. Successful resolutions log via `logger.debug('[ssrf] OK     host="%s" → "%s"', ...)` instead of the previous `console.log()` guarded by a manual `NODE_ENV !== 'production'` check. The explicit `NODE_ENV` guard is removed since pino's built-in log level system handles environment-aware output automatically.
+
+---
+
+## 📄 `requestId.js`
+
+Express middleware that ensures every request carries a unique tracing identifier (`req.id`) and echoes it back in the `X-Request-ID` response header. The actual UUID generation/reuse logic lives upstream in `utils/logger.js` (via pino-http's `genReqId` callback). This middleware runs after pino-http, so `req.id` is already populated for every normal HTTP request. A fallback UUID is generated here only if `req.id` is somehow missing (e.g., a non-HTTP entry point invoking the handler directly). Supports distributed-tracing scenarios where a client sends an `X-Request-ID` header that pino-http validates and reuses.
+
+### Imports and dependencies
+
+| Module | Imported elements | Type |
+|--------|-------------------|------|
+| `node:crypto` | `crypto` (namespace) | External (Node.js built-in) |
+
+### Functions
+
+- **`requestId(req: Request, res: Response, next: NextFunction) → void`** (default export)
+  Middleware function applied via `app.use(requestId)` in the Express chain. Two-step operation:
+  - **Fallback guard**: If `req.id` is falsy or not a string (should not occur under normal pino-http flow), generates a new UUID via `crypto.randomUUID()` and assigns it to `req.id`.
+  - **Header echo**: Sets the `X-Request-ID` response header to the value of `req.id`, enabling clients and downstream proxies to correlate request logs end-to-end.
+  - Passes control to `next()`.
+  - **Returns:** nothing — calls `next()` (side-effect only: mutates `req.id` if missing, sets response header).
+
+## 🔄 Changes in this update
+
+- **Task 17 — Request ID tracking (`requestId.js`) added:** New middleware file exported as default. When registered in `server.js` after pino-http, it guarantees every request has a UUID on `req.id` (with crypto fallback) and responds with the `X-Request-ID` header for correlation across logs and client-side debugging. Uses `node:crypto.randomUUID()` from the built-in Node.js crypto module. No external dependencies.

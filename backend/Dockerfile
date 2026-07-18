@@ -26,6 +26,26 @@ RUN npm install --production
 COPY . .
 
 # ------------------------------------------------------------------
+# Security: Create non-root user and set ownership
+#           System group/user (-S): no home dir, no login shell
+#           chmod ensures volume-mounted source files are readable
+# ------------------------------------------------------------------
+
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup \
+    && chown -R appuser:appgroup /app \
+    && chmod -R u+r,g+r /app
+
+USER appuser
+
+# ------------------------------------------------------------------
+# Health check — Express responds at /api/health with { status: 'ok' }
+# Runs as appuser (non-root). node is in PATH under node:20-alpine.
+# ------------------------------------------------------------------
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD node -e "require('http').get('http://localhost:8080/api/health', (r) => { process.exit(r.statusCode === 200 ? 0 : 1) })"
+
+# ------------------------------------------------------------------
 # Expose and run
 # ------------------------------------------------------------------
 

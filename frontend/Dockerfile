@@ -32,6 +32,27 @@ RUN npm ci
 COPY . .
 
 # ------------------------------------------------------------------
+# Security: Create non-root user and set ownership
+#           System group/user (-S): no home dir, no login shell
+#           chmod ensures volume-mounted source files are readable
+# ------------------------------------------------------------------
+
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup \
+    && chown -R appuser:appgroup /app \
+    && chmod -R u+r,g+r /app
+
+USER appuser
+
+# ------------------------------------------------------------------
+# Health check — Vite dev server responds at http://localhost:3000/
+# Runs as appuser (non-root). wget is provided by BusyBox in Alpine.
+# start-period=15s accounts for npm install + Vite first-compile time.
+# ------------------------------------------------------------------
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD wget --quiet --tries=1 --spider http://localhost:3000/ || exit 1
+
+# ------------------------------------------------------------------
 # Expose and run
 #           --host is MANDATORY for container networking: binds to
 #           0.0.0.0 instead of localhost, allowing external access.
@@ -79,4 +100,13 @@ COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 EXPOSE 80
 
-# CMD inherited from nginx base image
+USER nginx
+
+# ------------------------------------------------------------------
+# Health check — nginx serves static SPA at http://localhost:80/
+# Runs as nginx user. wget is provided by BusyBox in Alpine.
+# CMD inherited from nginx base image, so we add healthcheck after.
+# ------------------------------------------------------------------
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+  CMD wget --quiet --tries=1 --spider http://localhost:80/ || exit 1
