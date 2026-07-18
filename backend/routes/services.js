@@ -3,6 +3,7 @@ import PC from '../models/PC.js';
 import { validateServiceBody, validateServiceUpdate } from '../middleware/validation.js';
 import { authMiddleware, requireAdmin } from '../middleware/auth.js';
 import logger from '../utils/logger.js';
+import { sanitizeMiddleware } from '../middleware/sanitization.js';
 
 const router = express.Router();
 
@@ -42,7 +43,7 @@ router.get('/', authMiddleware, async (req, res) => {
 /*  POST / — Add a service to a PC                                    */
 /* ------------------------------------------------------------------ */
 
-router.post('/', authMiddleware, requireAdmin, validateServiceBody, async (req, res) => {
+router.post('/', authMiddleware, requireAdmin, sanitizeMiddleware, validateServiceBody, async (req, res) => {
   try {
     const pc = await PC.findById(getPcId(req));
     logger.info('[SVC POST] pc found=%s, pc._id=%s', !!pc, pc?._id?.toString());
@@ -79,7 +80,7 @@ router.post('/', authMiddleware, requireAdmin, validateServiceBody, async (req, 
 /*  PUT /:serviceIndex — Update a service by its array index          */
 /* ------------------------------------------------------------------ */
 
-router.put('/:serviceIndex', authMiddleware, requireAdmin, validateServiceUpdate, async (req, res) => {
+router.put('/:serviceIndex', authMiddleware, requireAdmin, sanitizeMiddleware, validateServiceUpdate, async (req, res) => {
   try {
     const pc = await PC.findById(getPcId(req));
     if (!pc) {

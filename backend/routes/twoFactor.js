@@ -4,6 +4,7 @@ import QRCode from 'qrcode';
 import speakeasy from 'speakeasy';
 import User from '../models/User.js';
 import RefreshToken from '../models/RefreshToken.js';
+import { manualAudit } from '../middleware/auditLogger.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { authLimiter } from '../middleware/rateLimit.js';
 import logger from '../utils/logger.js';
@@ -235,6 +236,10 @@ router.post('/verify', authLimiter, async (req, res) => {
     if (!user.totpEnabled) {
       user.totpEnabled = true;
       await user.save();
+
+      // Set req.user explicitly since no authMiddleware here
+      req.user = { userId: user._id.toString(), username: user.username };
+      await manualAudit('TWO_FACTOR_ENABLE', req);
     }
 
     /* --- Issue full session cookies ---------------------------------- */
@@ -323,6 +328,8 @@ router.post('/disable', authLimiter, authMiddleware, async (req, res) => {
     user.totpSecret = undefined;
     user.totpEnabled = false;
     await user.save();
+
+    await manualAudit('TWO_FACTOR_DISABLE', req);
 
     res.json({
       success: true,

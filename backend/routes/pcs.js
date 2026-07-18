@@ -3,6 +3,7 @@ import PC from '../models/PC.js';
 import { validatePcBody } from '../middleware/validation.js';
 import { authMiddleware, requireAdmin } from '../middleware/auth.js';
 import logger from '../utils/logger.js';
+import { sanitizeMiddleware } from '../middleware/sanitization.js';
 
 const router = express.Router();
 
@@ -44,7 +45,7 @@ router.get('/:id', authMiddleware, async (req, res) => {
 /*  POST / — Create new PC                                            */
 /* ------------------------------------------------------------------ */
 
-router.post('/', authMiddleware, requireAdmin, validatePcBody, async (req, res) => {
+router.post('/', authMiddleware, requireAdmin, sanitizeMiddleware, validatePcBody, async (req, res) => {
   try {
     const pc = new PC({
       nombre: req.body.nombre,
@@ -69,7 +70,7 @@ router.post('/', authMiddleware, requireAdmin, validatePcBody, async (req, res) 
 /*  PUT /:id — Update existing PC                                     */
 /* ------------------------------------------------------------------ */
 
-router.put('/:id', authMiddleware, requireAdmin, validatePcBody, async (req, res) => {
+router.put('/:id', authMiddleware, requireAdmin, sanitizeMiddleware, validatePcBody, async (req, res) => {
   try {
     const pc = await PC.findByIdAndUpdate(
       req.params.id,

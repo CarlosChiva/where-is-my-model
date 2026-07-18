@@ -5,6 +5,7 @@ import RefreshToken from '../models/RefreshToken.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { authLimiter } from '../middleware/rateLimit.js';
 import logger from '../utils/logger.js';
+import { sanitizeMiddleware } from '../middleware/sanitization.js';
 
 const router = express.Router();
 
@@ -133,7 +134,7 @@ function userProfile(user) {
 /*  POST /register — Create a new account                             */
 /* ------------------------------------------------------------------ */
 
-router.post('/register', authLimiter, async (req, res) => {
+router.post('/register', authLimiter, sanitizeMiddleware, async (req, res) => {
   try {
     const { username, password } = req.body;
 
@@ -211,7 +212,7 @@ router.post('/register', authLimiter, async (req, res) => {
 /*  POST /login — Authenticate and return a JWT                       */
 /* ------------------------------------------------------------------ */
 
-router.post('/login', authLimiter, async (req, res) => {
+router.post('/login', authLimiter, sanitizeMiddleware, async (req, res) => {
   try {
     const { username, password } = req.body;
 
@@ -293,7 +294,7 @@ router.post('/login', authLimiter, async (req, res) => {
 /*  POST /refresh — Rotate tokens via a valid refresh JWT             */
 /* ------------------------------------------------------------------ */
 
-router.post('/refresh', authLimiter, async (req, res) => {
+router.post('/refresh', authLimiter, sanitizeMiddleware, async (req, res) => {
   try {
     const raw = req.cookies?.refreshToken;
     if (!raw) {
