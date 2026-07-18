@@ -4,6 +4,7 @@ import PC from '../models/PC.js';
 import { checkPcServices, checkAllServices } from '../services/healthChecker.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { healthLimiter } from '../middleware/rateLimit.js';
+import logger from '../utils/logger.js';
 
 const router = express.Router();
 router.use(healthLimiter);
@@ -32,7 +33,7 @@ router.post('/pcs/:pcId', authMiddleware, async (req, res) => {
     if (err.name === 'CastError') {
       return res.status(400).json({ success: false, message: 'Invalid PC ID' });
     }
-    console.error('[health] POST /pcs/:pcId error:', err);
+    logger.error('[health] POST /pcs/:pcId error:', err);
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
@@ -47,7 +48,7 @@ router.post('/all', authMiddleware, async (req, res) => {
     const results = await checkAllServices(pcs);
     res.json({ success: true, data: results });
   } catch (err) {
-    console.error('[health] POST /all error:', err);
+    logger.error('[health] POST /all error:', err);
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });

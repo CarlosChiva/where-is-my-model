@@ -6,6 +6,7 @@ import User from '../models/User.js';
 import RefreshToken from '../models/RefreshToken.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { authLimiter } from '../middleware/rateLimit.js';
+import logger from '../utils/logger.js';
 
 const router = express.Router();
 
@@ -148,7 +149,7 @@ router.post('/setup', authLimiter, authMiddleware, async (req, res) => {
       manualEntry: secret.base32,
     });
   } catch (err) {
-    console.error('[2fa] POST /setup error:', err);
+    logger.error('[2fa] POST /setup error:', err);
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
@@ -255,7 +256,7 @@ router.post('/verify', authLimiter, async (req, res) => {
       user: userProfile(user),
     });
   } catch (err) {
-    console.error('[2fa] POST /verify error:', err);
+    logger.error('[2fa] POST /verify error:', err);
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
@@ -328,7 +329,7 @@ router.post('/disable', authLimiter, authMiddleware, async (req, res) => {
       message: 'Two-factor authentication has been disabled.',
     });
   } catch (err) {
-    console.error('[2fa] POST /disable error:', err);
+    logger.error('[2fa] POST /disable error:', err);
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
@@ -355,7 +356,7 @@ router.get('/status', authMiddleware, async (req, res) => {
       totpEnabled: !!user.totpEnabled,
     });
   } catch (err) {
-    console.error('[2fa] GET /status error:', err);
+    logger.error('[2fa] GET /status error:', err);
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });

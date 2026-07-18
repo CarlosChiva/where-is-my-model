@@ -1,7 +1,7 @@
 # `routes`
 
 > Path: `backend/routes/`
-> Last updated: 2026-07-16 (Task 6 — httpOnly cookie sameSite fix)
+> Last updated: 2026-07-18 (Task 10 — Replace console.log with structured logger pino)
 > Type: Leaf folder
 
 Express route modules for the API server. Each file exports a single `express.Router()` instance with RESTful endpoints, unified error handling, and standardized `{ success, data? }` response envelopes. Authentication routes now use a cookie-based two-token architecture (short-lived access tokens + long-lived refresh tokens) and include TOTP-based 2FA intercept in the login flow.
@@ -352,6 +352,7 @@ Express router for TOTP-based two-factor authentication (2FA). Default-exports a
 | `../models/RefreshToken.js` | `RefreshToken` (default) | Internal |
 | `../middleware/auth.js` | `authMiddleware` (named) | Internal |
 | `../middleware/rateLimit.js` | `authLimiter` (named) | Internal |
+| `../utils/logger.js` | `logger` (default) | Internal |
 
 ### Constants
 
@@ -359,6 +360,10 @@ Express router for TOTP-based two-factor authentication (2FA). Default-exports a
 |----------|-------|---------|
 | `TEMP_SESSION_TTL_MS` | `300_000` (5 minutes) | Maximum lifetime of a temporary 2FA session. Used in the dual-mode `/verify` endpoint to detect expired post-login sessions. |
 | `APP_NAME` | `'WhereIsMyModel'` | Application identifier embedded in the TOTP otpauth URI label (`'WhereIsMyModel:{username}'`). |
+
+### Error logging
+
+All four endpoints (`/setup`, `/verify`, `/disable`, `/status`) log catch-block errors via `logger.error('[2fa] <METHOD> <PATH> error:', err)` using the pino structured logger imported from `../utils/logger.js`.
 
 ### Helper functions
 
@@ -458,6 +463,10 @@ Authenticated endpoint (requires valid access token via `authMiddleware`). Looks
 | Export | Type | Description |
 |--------|------|-------------|
 | `default` | `express.Router()` | Router instance with 4 TOTP 2FA endpoints mounted at `/api/auth/2fa` via `server.js`. Registered **before** the general `/api/auth` router to prevent Express route collision. |
+
+## 🔄 Changes in this update
+
+- **Task 10 — Replaced console.log with structured logger pino:** Added import for `../utils/logger.js` (`logger`). All four catch blocks across `/setup`, `/verify`, `/disable`, and `/status` no longer call `console.error()` — they now log via `logger.error('[2fa] <METHOD> <PATH> error:', err)`.
 
 ---
 

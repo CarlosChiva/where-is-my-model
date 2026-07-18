@@ -1,5 +1,6 @@
 import net from 'net';
 import { resolveAndValidate } from '../middleware/ssrfProtection.js';
+import logger from '../utils/logger.js';
 
 /* ------------------------------------------------------------------ */
 /*  checkHttpEndpoint — HTTP GET probe against a specific endpoint    */
@@ -22,7 +23,7 @@ async function checkHttpEndpoint(host, port, endpoint, protocol) {
     clearTimeout(timeoutId);
     return response.status >= 200 && response.status < 400;
   } catch (err) {
-    console.warn(
+    logger.warn(
       `[health] http:${protocol}://${host}:${port}${endpoint}` +
       ` ${err.code ?? err.message}`
     );
@@ -73,7 +74,7 @@ function checkServiceStatus(host, port, endpoint, protocol) {
       socket.on('error', (err) => {
         socket.destroy();
         if (err.code !== 'ECONNRESET') {
-          console.warn(
+          logger.warn(
             `[health] port:${port} host="${host}" ip="${ip ?? 'unknown'}" ${err.code ?? err.message}`
           );
         }

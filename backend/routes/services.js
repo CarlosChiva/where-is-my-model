@@ -2,6 +2,7 @@ import express from 'express';
 import PC from '../models/PC.js';
 import { validateServiceBody, validateServiceUpdate } from '../middleware/validation.js';
 import { authMiddleware, requireAdmin } from '../middleware/auth.js';
+import logger from '../utils/logger.js';
 
 const router = express.Router();
 
@@ -32,7 +33,7 @@ router.get('/', authMiddleware, async (req, res) => {
     if (err.name === 'CastError') {
       return res.status(400).json({ success: false, message: 'Invalid PC ID format.' });
     }
-    console.error('[services] GET / error:', err);
+    logger.error('[services] GET / error:', err);
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
@@ -44,7 +45,7 @@ router.get('/', authMiddleware, async (req, res) => {
 router.post('/', authMiddleware, requireAdmin, validateServiceBody, async (req, res) => {
   try {
     const pc = await PC.findById(getPcId(req));
-    console.log('[SVC POST] pc found=', !!pc, 'pc._id=', pc?._id?.toString());
+    logger.info('[SVC POST] pc found=%s, pc._id=%s', !!pc, pc?._id?.toString());
     if (!pc) {
       return res.status(404).json({ success: false, message: 'PC not found' });
     }
@@ -69,7 +70,7 @@ router.post('/', authMiddleware, requireAdmin, validateServiceBody, async (req, 
       const messages = Object.values(err.errors).map((e) => e.message);
       return res.status(400).json({ success: false, errors: messages });
     }
-    console.error('[services] POST / error:', err);
+    logger.error('[services] POST / error:', err);
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
@@ -118,7 +119,7 @@ router.put('/:serviceIndex', authMiddleware, requireAdmin, validateServiceUpdate
       const messages = Object.values(err.errors).map((e) => e.message);
       return res.status(400).json({ success: false, errors: messages });
     }
-    console.error('[services] PUT /:serviceIndex error:', err);
+    logger.error('[services] PUT /:serviceIndex error:', err);
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
@@ -155,7 +156,7 @@ router.delete('/:serviceIndex', authMiddleware, requireAdmin, async (req, res) =
     if (err.name === 'CastError') {
       return res.status(400).json({ success: false, message: 'Invalid PC ID format.' });
     }
-    console.error('[services] DELETE /:serviceIndex error:', err);
+    logger.error('[services] DELETE /:serviceIndex error:', err);
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });

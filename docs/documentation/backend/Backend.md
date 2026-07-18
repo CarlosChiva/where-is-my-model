@@ -1,7 +1,7 @@
 # `backend`
 
 > Path: `backend/`
-> Last updated: 2026-07-16
+> Last updated: 2026-07-18
 > Type: Composite folder
 
 Express + Mongoose REST API server that manages GPU compute servers and their assigned network services. The backend enforces per-GPU VRAM capacity constraints at the schema level (Mongoose validators), middleware level (request-body validation), and route level (error handling). Deployed as a Node.js 20 Alpine container via Docker Compose, backed by MongoDB for persistent storage. Multi-GPU servers are fully supported — each GPU is individually tracked with its own VRAM allocation pool, and services can be reassigned between GPUs on the same server via partial-update routes.
@@ -14,8 +14,9 @@ Express + Mongoose REST API server that manages GPU compute servers and their as
 |--------|--------------|-------------|
 | `models/` | [see docs](./models.md) | Mongoose schema definitions for the PC model (multi-GPU servers with embedded service subdocuments, per-GPU virtual fields, and document-level VRAM-cap validators). |
 | `routes/` | [see docs](./routes.md) | Express Router modules providing CRUD REST endpoints for PCs (`/api/pcs`) and nested Services (`/api/pcs/:pcId/services`), authentication flows at `/api/auth` (with cookie-based two-token rotation and 2FA intercept), TOTP-based 2FA management at `/api/auth/2fa`, admin user listing at `/api/users`, and TCP health checks at `/api/check-health`. Standardized response envelopes and CastError handling. |
-| `middleware/` | [see docs](./middleware.md) | Request-body validation middleware (collect-all-errors pattern) enforcing per-GPU VRAM limits, IPv4 format checks, and legacy vram-to-gpus-array transformation. Also includes rate-limiting middleware (`express-rate-limit`) with three tiered limiters for global API, authentication endpoints, and health probes. |
+| `middleware/` | [see docs](./middleware.md) | Request-body validation middleware (collect-all-errors pattern) enforcing per-GPU VRAM limits, IPv4 format checks, and legacy vram-to-gpus-array transformation. Also includes rate-limiting middleware (`express-rate-limit`) with three tiered limiters for global API, authentication endpoints, and health probes. Plus request-ID tracking middleware (`requestId.js`) guaranteeing a UUID on every request and echoing it via the `X-Request-ID` response header for distributed-tracing correlation. |
 | `services/` | [see docs](./services.md) | Application-level services — TCP health-check utility (`healthChecker.js`) for probing the reachability of network services hosted on GPU compute servers, using only Node.js built-in `net`. |
+| `utils/` | [see docs](./utils.md) | Shared logging infrastructure — Pino logger singleton, `pino-http` middleware factory with sensitive query-parameter stripping and distributed-tracing request ID generation (via `genReqId` callback using RFC 4122 UUID validation), and URL sanitization for access-log hygiene. |
 
 ---
 
@@ -23,7 +24,7 @@ Express + Mongoose REST API server that manages GPU compute servers and their as
 
 ### `server.js`
 
-Application entry point. Loads environment configuration, constructs the MongoDB connection URI dynamically via `buildMongoUri()` (supports both authenticated mode for Docker Compose deployments and unauthenticated mode for local development), performs startup validation of required secrets (JWT_SECRET, JWT_EXPIRES_IN, JWT_REFRESH_SECRET, JWT_REFRESH_EXPIRES_IN), establishes the MongoDB connection via Mongoose, registers Express middleware (Helmet security headers, CORS with origin allowlist, cookie parsing via `cookie-parser`, JSON body parsing, global rate limiting), serves a simple inline health check (`GET /api/health`), mounts six route modules in dependency-safe order (twoFactor first to prevent parameter collision, then auth, users, health, services before PCs), installs a global error handler, and starts listening on the configured port. Trusts the first reverse proxy for forwarded headers.
+Application entry point. Loads environment configuration, constructs the MongoDB connection URI dynamically via `buildMongoUri()` (supports both authenticated mode for Docker Compose deployments and unauthenticated mode for local development), performs startup validation of required secrets (JWT_SECRET, JWT_EXPIRES_IN, JWT_REFRESH_SECRET, JWT_REFRESH_EXPIRES_IN), establishes the MongoDB connection via Mongoose, registers Express middleware in order — Helmet security headers, CORS with origin allowlist, pino-http logging middleware (`createHttpLogger()` from `utils/logger.js`) for HTTP request/response logging with URL sanitization and distributed-tracing request ID generation, request ID tracing middleware (`requestId` from `middleware/requestId.js`) guaranteeing `req.id` presence and echoing `X-Request-ID` in every response, cookie parsing via `cookie-parser`, JSON body parsing, global rate limiting — serves a simple inline health check (`GET /api/health`), mounts six route modules in dependency-safe order (twoFactor first to prevent parameter collision, then auth, users, health, services before PCs), installs a global error handler that includes `requestId` in every JSON error envelope for log correlation, and starts listening on the configured port. Trusts the first reverse proxy for forwarded headers.
 
 ### Imports and dependencies
 
@@ -35,7 +36,9 @@ Application entry point. Loads environment configuration, constructs the MongoDB
 | `express` | `default` (namespace) | External |
 | `helmet` | `default` (namespace) | External |
 | `mongoose` | `default` (namespace) | External |
+| `./utils/logger.js` | `logger` (default), `createHttpLogger` (named) | Internal |
 | `./middleware/rateLimit.js` | `globalLimiter` (named) | Internal |
+| `./middleware/requestId.js` | `requestId` (default) | Internal |
 
 ### Configuration
 
@@ -82,10 +85,10 @@ Registered after all routes; catches any error that escapes route-level try/catc
 
 | Error type | HTTP status | Response envelope |
 |-----------|-------------|-------------------|
-| `SyntaxError` / `entity.parse.failed` | 400 | `{ success: false, message: 'Invalid JSON in request body.' }` |
-| Mongoose `CastError` | 400 | `{ success: false, message: 'Invalid value for parameter "{err.path}".' }` |
-| Mongoose `ValidationError` | 400 | `{ success: false, errors: [string, ...] }` — extracted from `err.errors` |
-| Unhandled (default) | 500 | `{ success: false, message: 'Internal server error' }` |
+| `SyntaxError` / `entity.parse.failed` | 400 | `{ success: false, message: 'Invalid JSON in request body.', requestId: req.id }` |
+| Mongoose `CastError` | 400 | `{ success: false, message: 'Invalid value for parameter "{err.path}".', requestId: req.id }` |
+| Mongoose `ValidationError` | 400 | `{ success: false, errors: [string, ...], requestId: req.id }` — extracted from `err.errors` |
+| Unhandled (default) | 500 | `{ success: false, message: 'Internal server error', requestId: req.id }` |
 
 ---
 
@@ -224,6 +227,20 @@ Single-stage Docker image for production deployment. Based on Node.js 20 Alpine 
 | Exposed port | `8080` |
 | Default command | `node server.js` |
 
+### Health check
+
+A `HEALTHCHECK` directive is configured at the Dockerfile level so that Docker can determine whether the Express process inside the container is alive and able to respond. It runs as the non-root `appuser`, using Node.js's built-in `http` module — no external binaries required:
+
+| Parameter | Value | Purpose |
+|-----------|-------|---------|
+| **command** | `node -e "require('http').get('http://localhost:8080/api/health', (r) => { process.exit(r.statusCode === 200 ? 0 : 1) })"` | Hits the inline `/api/health` endpoint registered in `server.js`; exits 0 on HTTP 200, exits 1 otherwise |
+| **interval** | `30s` | Frequency between health probes |
+| **timeout** | `5s` | Maximum time a probe is allowed to run before being marked failed |
+| **start-period** | `10s` | Grace period after container start during which failures are ignored (allows Express startup + MongoDB connection handshake to complete) |
+| **retries** | `3` | Consecutive failures before Docker marks the container as `unhealthy` |
+
+This health check enables Docker Compose's `condition: service_healthy` dependency — the frontend service will not start until the backend passes its first health probe.
+
 ---
 
 ### `package.json`
@@ -261,6 +278,9 @@ Node.js project manifest. Declares the backend as an ES module (`"type": "module
 | `jsonwebtoken` | `^9.0.3` | JSON Web Token generation and verification for session-based auth |
 | `speakeasy` | `^2.0.0` | TOTP/Hotp implementation — generates secrets, OTPAuth URIs, and performs timing-safe TOTP code verification for 2FA |
 | `qrcode` | `^1.5.4` | QR code generation — produces data URIs from OTPAuth URLs for scanning by authenticator apps |
+| `pino` | `^9.14.0` | Structured JSON logging — high-performance logger reused across the entire application (shared instance via `utils/logger.js`) |
+| `pino-http` | `^10.0.0` | HTTP request/response middleware for pino — logs every inbound API call with method, URL, status code, response time, and matched Express route path; sanitizes sensitive query parameters from logged URLs |
+| `pino-pretty` | `^13.1.3` | Human-readable transport for pino — colorized timestamps in development mode; disabled in production for JSON-only output |
 
 ---
 
@@ -455,6 +475,17 @@ Client request
     │
     ├─→ CORS middleware (origin whitelist from CLIENT_URL)
     │
+    ├─→ pino-http logging middleware (createHttpLogger())
+    │       Logs method, sanitized URL, status code, response time, Express route path
+    │       Sensitive query params stripped via sanitizeUrl() before serialization
+    │       Distributed-tracing: genReqId generates/reuses a UUID (req.id) per request
+    │
+    ├─→ requestId middleware (middleware/requestId.js)
+    │       Ensures req.id is present (fallback crypto.randomUUID() if absent)
+    │       Echoes X-Request-ID header on every response for client-side correlation
+    │
+    ├─→ cookieParser (session cookie parsing for access/refresh tokens)
+    │
     ├─→ express.json() (body parsing; errors → global 400 handler)
     │
     ├─→ globalLimiter (rate limiting on all /api/* routes — 100 req/15 min per IP)
@@ -570,3 +601,35 @@ The Dockerfile produces a single-stage Node.js 20 Alpine image. In development, 
   - **Authentication infrastructure section:** Completely rewritten to reflect the new two-tier cookie-based session system and TOTP 2FA capabilities. Added a dedicated sequence diagram showing `POST /setup` → QR generation → `POST /verify` → timing-safe verification → token issuance. Updated the "What exists now" table with entries for the RefreshToken model, 2FA routes, and expanded dependency list. Rewrote the active endpoints table to include all five auth endpoints plus four 2FA endpoints across two router modules. Added the `pending` role to the RBAC documentation.
   - **Models:** Updated User.js fields table (documented in models.md) with `totpSecret` and `totpEnabled` schema additions.
   - **Routes:** Full documentation for `twoFactor.js` added to routes.md, plus comprehensive auth.js updates covering cookie-based token management, the post-login 2FA intercept flow, `/refresh`, `/logout`, temp session helpers, and shared helper functions duplicated from twoFactor.js.
+
+---
+
+## 🔄 Changes in this update
+
+- **Task 11 — HEALTHCHECK added to backend Dockerfile:** A `HEALTHCHECK` directive was added that uses Node.js built-in `http` module to probe `GET /api/health` on `localhost:8080`. Runs as non-root `appuser`. Configured with 30s interval, 5s timeout, 10s start-period, 3 retries. New "Health check" section added to the Dockerfile documentation with full parameter table. This health check is consumed by `docker-compose.yml` — the frontend service uses `depends_on.backend.condition: service_healthy` so that Vite does not start until the backend passes its first health probe.
+
+---
+
+## 🔄 Changes in this update
+
+- **Task 18 — HTTP request/response logging middleware (pino-http):**
+  - **`package.json`:** Three new production dependencies installed: `pino@^9.14.0` (structured JSON logging), `pino-http@^10.0.0` (Express HTTP access-log middleware), and `pino-pretty@^13.1.3` (human-readable transport for development). Updated the dependencies table accordingly.
+  - **New file — `utils/logger.js`:** Full rewrite of the logging infrastructure. The module now exports:
+    - **Default export (`logger`)**: Shared Pino logger singleton with redaction paths expanded to include query-parameter keys (`req.query.password`, `req.query.token`, `req.query.accessToken`, `req.query.refreshToken`). Uses `pino-pretty` transport in development for colorized output; JSON-only in production.
+    - **`createHttpLogger()` (named)**: Factory returning a pino-http Express middleware that — reuses the shared logger, sanitizes sensitive query parameters from logged URLs via `sanitizeUrl()`, and appends the matched Express route path as a `route` field on every log line for full request-to-route tracing.
+    - **`sanitizeUrl()` (named)**: Utility that strips sensitive query-parameter keys (`password`, `token`, `accessToken`, `refreshToken`, `authorization`, `auth`) from URLs before logging. Case-insensitive match via `SENSTIVE_QUERY_PARAMS` Set.
+  - **`server.js`:** Updated import statement to include `createHttpLogger` as a named export alongside the default `logger` export (`import logger, { createHttpLogger } from './utils/logger.js'`). Registered pino-http middleware (`app.use(createHttpLogger())`) between CORS and cookieParser in the Express middleware chain — positioned after security headers and origin checks so that access logs capture the final resolved request context. New section comment documents its placement and purpose.
+  - **Subfolder table updated:** New `utils/` entry added with link to `./utils.md`.
+  - **Request flow diagram updated:** Added pino-http logging middleware step between CORS and cookieParser in the architecture overview's request flow diagram.
+
+---
+
+## Changes in this update
+
+- **Task 17 — Request ID tracking across the backend:**
+  - **New file — `middleware/requestId.js`:** New Express middleware that guarantees every request carries a UUID on `req.id` (with `crypto.randomUUID()` fallback) and sets the `X-Request-ID` response header for client-side correlation. Registered in `server.js` immediately after pino-http so pino's `genReqId` callback has already populated `req.id`.
+  - **`utils/logger.js`:** Added `crypto` import from `node:crypto`. New constant `VALID_UUID_RE` (RFC 4122 UUID regex) for validating incoming request IDs. The `createHttpLogger()` factory now includes a `genReqId(req, _res)` callback — if the client sends a valid RFC 4122 UUID in the `X-Request-ID` header, that ID is reused by pino-http (assigned to `req.id`) for distributed-tracing correlation across logs. Otherwise a new UUID is generated via `crypto.randomUUID()`.
+  - **`server.js`:** New import of `requestId` from `./middleware/requestId.js`. Registered as `app.use(requestId)` after pino-http and before cookieParser (line 107). All four error-handler JSON responses in the global error handler now include `requestId: req.id` for log correlation.
+  - **Subfolder descriptions updated:** `middleware/` entry now mentions request-ID tracking; `utils/` entry notes distributed-tracing request ID generation.
+  - **Request flow diagram updated:** Added requestId middleware step between pino-http and cookieParser.
+  - **Global error handler table updated:** All four error response envelopes now document the `requestId: req.id` field.

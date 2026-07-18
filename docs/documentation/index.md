@@ -4,7 +4,7 @@
 > Last updated: 2026-07-11
 > Type: Composite folder (project root)
 
-**Where Is My Model** is a full-stack web application that serves as a GPU infrastructure dashboard for catalogueing multi-GPU compute servers running AI inference services. The frontend lets operators see real-time VRAM occupancy via colour-coded progress bars, manage server and service inventories through CRUD operations in modal dialogs, and estimate VRAM budgets for loading large language models using an interactive calculator with seven attention-architecture variants. The backend enforces per-GPU VRAM capacity constraints at three levels (schema validator, request-body middleware, route error handling) and persists all state to MongoDB. The entire stack is containerised and orchestrated by a single `docker-compose.yml` file that brings up three services on a shared Docker bridge network: Vite dev server (frontend), Express API (backend), and MongoDB (data store).
+**Where Is My Model** is a full-stack web application that serves as a GPU infrastructure dashboard for catalogueing multi-GPU compute servers running AI inference services. The frontend lets operators see real-time VRAM occupancy via colour-coded progress bars, manage server and service inventories through CRUD operations in modal dialogs, and estimate VRAM budgets for loading large language models using an interactive calculator with seven attention-architecture variants. The backend enforces per-GPU VRAM capacity constraints at three levels (schema validator, request-body middleware, route error handling) and persists all state to MongoDB. The entire stack is containerised and orchestrated by a single `docker-compose.yml` file that brings up four services on a shared Docker bridge network: nginx reverse proxy with TLS termination (HTTPS on 443, HTTP-to-HTTPS redirect on 80), Vite dev server (frontend), Express API (backend), and MongoDB (data store).
 
 ---
 
@@ -12,8 +12,9 @@
 
 | Folder | Documentation | Description |
 |--------|--------------|-------------|
-| `backend/` | [see docs](./backend/Backend.md) | Express + Mongoose REST API with per-GPU VRAM capacity enforcement, multi-GPU schema support, request-body validation middleware, and integration tests. |
+| `backend/` | [see docs](./backend/Backend.md) | Express + Mongoose REST API with per-GPU VRAM capacity enforcement, multi-GPU schema support, request-body validation middleware, structured HTTP logging via pino-http with sensitive-parameter sanitization, and integration tests. |
 | `frontend/` | [see docs](./frontend.md) | React 19 + Vite 8 SPA project root: Tailwind theme configuration, PostCSS/ESLint pipeline config, package manifest, three-stage Dockerfile, nginx production server config, SPA entry HTML, and environment files. |
+| `nginx/` | [see docs](./nginx.md) | Edge reverse-proxy configuration with TLS termination (HTTPS on 443), HTTP-to-HTTPS redirect (80), comprehensive security headers (HSTS, CSP, X-Frame-Options, Referrer-Policy, Permissions-Policy), plus self-signed certificate generation script for development. |
 
 ---
 
@@ -21,13 +22,14 @@
 
 ### `docker-compose.yml`
 
-Single-file Docker Compose orchestration that brings up the entire three-service stack on a shared `app-network` bridge network. Defines explicit startup ordering with health-check dependencies so that the backend does not start until MongoDB is healthy, and the frontend waits for the backend to be available.
+Single-file Docker Compose orchestration that brings up the entire four-service stack on a shared `app-network` bridge network. Defines explicit startup ordering with health-check dependencies: each service waits for its upstream dependency to pass its own Docker health check before launching — backend waits for MongoDB's authenticated health probe, frontend waits for the backend API's HTTP health probe at `/api/health`, and nginx waits for both frontend and backend to be healthy before accepting external traffic. The entire chain forms a strict health-gated boot sequence with TLS termination at the nginx edge.
 
 ### Composition overview
 
 | Service | Image / Build context | Host port | Container port | Depends on | Key configuration |
 |---------|----------------------|-----------|----------------|------------|-------------------|
-| `frontend` | `./frontend` (multi-stage, `development` target) | `3000` → `3000` | Vite dev server + HMR | `backend` (service ready) | Volume mount `./frontend:/app` for live-reload; named volume `/app/node_modules` to avoid host-node-modules conflict; `VITE_API_PROXY_TARGET=http://backend:8080` env var for API proxy |
+| `nginx` | `nginx:alpine` (official) | `80:80`, `443:443` | HTTP redirect on 80, HTTPS with TLS termination on 443 | `frontend` + `backend` (both `service_healthy`) | Mounts `./nginx/nginx.conf` as `/etc/nginx/nginx.conf` (read-only) and `./nginx/certs/` as `/etc/nginx/certs` (read-only); self-signed dev certificates (`server.crt`, `server.key`) generated by `nginx/generate-certs.sh`; proxies `/api/*` → `backend:8080`, `/hmr` + `/` → `frontend:3000`; HTTP → HTTPS 301 redirect |
+| `frontend` | `./frontend` (multi-stage, `development` target) | `3000` → `3000` | Vite dev server + HMR | `backend` (`service_healthy`) | Volume mount `./frontend:/app` for live-reload; named volume `/app/node_modules` to avoid host-node-modules conflict; `VITE_API_PROXY_TARGET=http://backend:8080` env var for API proxy |
 | `backend` | `./backend` (Node 20 Alpine) | `9003` → `8080` | Express on port 8080 | `mongo` (`service_healthy`) | Loads `./backend/.env.development`; volume mount `./backend:/app` for live-reload; named volume `/app/node_modules`; connects to MongoDB using component env vars (`MONGODB_HOST`, `MONGODB_PORT`, `MONGODB_DATABASE`, `MONGODB_USERNAME`, `MONGODB_PASSWORD`) assembled by `buildMongoUri()` in `server.js` |
 | `mongo` | `mongo:7` (official) | — (internal only, not exposed to host) | 27017 | — | Authentication enabled via `MONGO_INITDB_ROOT_USERNAME=admin` and `MONGO_INITDB_ROOT_PASSWORD=changeme_dev_password`; health check via authenticated `mongosh` connection (`mongodb://admin:***@localhost:27017/admin`) with 10 s interval, 5 s timeout, 5 retries, 10 s start period; persistent volume `mongo-data:/data/db` |
 
@@ -37,10 +39,15 @@ Single-file Docker Compose orchestration that brings up the entire three-service
 Host runs: docker compose up
          │
          ├── mongo starts → creates admin user (MONGO_INITDB_ROOT_USERNAME/PASSWORD) → healthcheck polls every 10s using authenticated mongosh until ping succeeds
+         │   └── condition: service_healthy is met → backend may start
          │
-         └── backend starts once mongo is healthy → loads .env.development → buildMongoUri() constructs mongodb://admin:***@mongo:27017/where-is-my-model → connects with authentication
-             │
-             └── frontend starts once backend is up → Vite dev server on :3000 with API proxy pointing to http://backend:8080
+         ├── backend starts once mongo is healthy → loads .env.development → buildMongoUri() constructs mongodb://admin:***@mongo:27017/where-is-my-model → connects with authentication
+         │   └── HEALTHCHECK (node -e http module) polls /api/health every 30s, start-period=10s → condition: service_healthy is met → frontend + nginx may start
+         │
+         ├── frontend starts once backend is healthy → Vite dev server on :3000 with API proxy pointing to http://backend:8080
+         │   └── HEALTHCHECK (wget --spider) polls localhost:3000 every 30s, start-period=15s → condition: service_healthy is met → nginx may start
+         │
+         └── nginx starts once both frontend and backend are healthy → serves HTTPS on :443 (TLS termination with self-signed dev certs), HTTP redirect on :80 → condition: nothing depends on it (edge proxy)
 ```
 
 ### Named volumes
@@ -67,6 +74,7 @@ Repository-level version-control exclusion list. Prevents sensitive environment 
 | `dist/` | Vite production build output (regenerated on every `npm run build`) |
 | `node_modules/` | Node.js dependencies (installed fresh via `npm install`; not portable across platforms) |
 | `skills-lock.json` | Auto-generated lockfile for agent skill versions — tracked per-environment, not in source control |
+| `nginx/certs/` | Self-signed TLS certificates generated at runtime by `nginx/generate-certs.sh` — private keys must never be committed to version control |
 
 ### Environment file policy
 
@@ -204,7 +212,7 @@ Browser (port 3000)
 
 ### How the pieces fit together
 
-1. **Infrastructure layer** — Docker Compose starts MongoDB first, creating an admin user via `MONGO_INITDB_ROOT_USERNAME` and `MONGO_INITDB_ROOT_PASSWORD`. The health check uses an authenticated `mongosh` connection. Once MongoDB pings clean, the backend container launches, reads component environment variables (`MONGODB_HOST`, `MONGODB_PORT`, `MONGODB_DATABASE`, `MONGODB_USERNAME`, `MONGODB_PASSWORD`) and constructs the connection URI via `buildMongoUri()` in `server.js`, then connects with authentication. Finally, the frontend Vite dev server starts, configured to proxy all `/api/*` requests to `http://backend:8080`.
+1. **Infrastructure layer** — Docker Compose starts MongoDB first, creating an admin user via `MONGO_INITDB_ROOT_USERNAME` and `MONGO_INITDB_ROOT_PASSWORD`. The health check uses an authenticated `mongosh` connection. Once MongoDB pings clean (`condition: service_healthy`), the backend container launches, reads component environment variables (`MONGODB_HOST`, `MONGODB_PORT`, `MONGODB_DATABASE`, `MONGODB_USERNAME`, `MONGODB_PASSWORD`) and constructs the connection URI via `buildMongoUri()` in `server.js`, then connects with authentication. The backend itself has a Docker `HEALTHCHECK` (Node.js `http` module probing `/api/health`). Once that passes (`condition: service_healthy` from docker-compose), the frontend Vite dev server starts, configured to proxy all `/api/*` requests to `http://backend:8080`. The frontend also has its own health check (wget on port 3000) for Docker lifecycle management.
 
 2. **Data persistence** — Every PC (compute server) is a single MongoDB document in the `pcs` collection. Services running on that server are embedded subdocuments within the parent PC record. No separate services collection exists. The Mongoose `PC` model defines per-GPU VRAM capacity validators that fire both at the schema level and during `.save()`.
 
@@ -278,3 +286,26 @@ Browser (port 3000)
 - **Startup ordering diagram updated:** Reflects admin user creation during MongoDB initialization and authenticated connection from the backend.
 - **Architecture diagram updated:** The Mongoose connection string annotation now shows both auth mode (Docker) and no-auth mode (local dev) URIs, built by `buildMongoUri()`. The MongoDB section notes that authentication is enabled.
 - **"How the pieces fit together" paragraph #1 updated:** Rewritten to describe the full authentication flow: admin user creation, authenticated health check, component-based URI construction, and authenticated MongoDB connection.
+
+---
+
+## 🔄 Changes in this update
+
+- **Task 11 — HEALTHCHECK directives added across all services:**
+  - **`docker-compose.yml` composition table updated:** The `frontend` dependency on `backend` changed from a simple list entry (`- backend`) to a structured `condition: service_healthy`. This means the frontend now waits for the backend's Docker health check to pass (HTTP 200 from `/api/health`) before starting, rather than just waiting for the container process to begin.
+  - **Startup ordering diagram updated:** Now documents all three services' health checks and their `service_healthy` dependency chain: mongo → backend → frontend. Each arrow explicitly notes which health check must pass. The frontend's own health check (wget on port 3000, start-period=15s) is documented as a leaf node — nothing depends on it, but it provides Docker lifecycle status visibility.
+  - **General description updated:** Now emphasizes the three-level health-gated boot sequence where each service has its own liveness probe.
+  - **Paragraph #1 ("Infrastructure layer") updated:** Expanded to describe how both backend and frontend have their own HEALTHCHECK directives, and how Compose chains them via `condition: service_healthy`.
+- **`docs/documentation/backend/Backend.md` updated:** New "Health check" subsection added to the Dockerfile documentation — 5-row parameter table (command, interval, timeout, start-period, retries) with descriptions of the Node.js built-in `http` module probe against `/api/health`.
+- **`docs/documentation/frontend.md` updated:** The three-stage Dockerfile overview now notes HEALTHCHECK steps in both development and production stage layers. New "Health checks" section with a 2-row table comparing the development (wget on :3000, 15s start-period) and production (wget on :80, 5s start-period) health check configurations.
+
+---
+
+## 🔄 Changes in this update
+
+- **Task 8 — CSP and HSTS security headers added to nginx configuration:**
+  - **`docs/documentation/nginx.md` created** as a new first-level leaf document covering the `nginx/` folder with two files:
+    - `nginx.conf` — full documentation of the HTTP→HTTPS redirect server, TLS termination server with all six Task-8 security headers (HSTS, CSP with per-directive breakdown table for 9 directives, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy with 9-feature breakdown), and all three location proxy blocks (`/api`, `/hmr`, `/`).
+    - `generate-certs.sh` — documented CLI interface, idempotency logic, three-step PKI generation workflow (CA creation → server key+CSR with SAN → CA-signed server cert), temp-file cleanup, and console output conventions.
+  - **`docs/documentation/index.md` updated:** Added `nginx/` row to the Module Map subfolder table.
+  - **`docs/documentation/frontend.md` updated:** Replaced the outdated security headers section in the `frontend/nginx.conf` documentation (3-header table listing X-Frame-Options, X-Content-Type-Options, X-XSS-Protection) with Task 8's comprehensive 5-header set including full CSP directive, Referrer-Policy, and Permissions-Policy. Added explanation of HSTS omission rationale on the HTTP-only production frontend server. Noted that security headers are repeated across all three location blocks (static assets, index.html, global scope) due to nginx's header-overwrite behavior.
