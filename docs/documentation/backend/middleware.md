@@ -1,7 +1,7 @@
 # `middleware`
 
 > Path: `backend/middleware/`
-> Last updated: 2026-07-18 (Task 17 — Add Request ID tracking)
+> Last updated: 2026-07-18 (Task 24 — Input Sanitization Middleware)
 > Type: Leaf folder
 
 Request validation middleware for the Express backend. Provides middleware functions used as route handlers on PC creation/update and service creation/update endpoints. All validators follow a collect-all-errors pattern (rather than fail-fast) and return a single 400 response with an `errors` array when validation fails. A legacy fallback auto-transforms a scalar `vram` field into the new `gpus` array format for backward compatibility. Also includes rate-limiting middleware via `express-rate-limit` v7 to protect against abuse — three distinct limiters target the global API surface, authentication endpoints, and health-check probes respectively.
@@ -172,6 +172,70 @@ Server-Side Request Forgery (SSRF) protection module. Resolves hostnames to IP a
 - **Task 10 — Replaced console.log with structured logger pino:** Added import for `../utils/logger.js` (`logger`). Three `console.warn()` calls and one `console.log()` call have been replaced with pino's sprintf-style format strings:
   - `parseAllowlist()`: Invalid CIDR entries now log via `logger.warn('[ssrf] invalid CIDR in allowlist: "%s" — skipping', cidr)` instead of `console.warn()`.
   - `resolveAndValidate()`: Blocked hosts log via `logger.warn('[ssrf] BLOCKED host="%s" resolved_ip="%s" reason="%s"', ...)` instead of `console.warn()`. DNS failures log via `logger.warn('[ssrf] DNS FAIL host="%s" error="%s — %s"', ...)` instead of `console.warn()`. Successful resolutions log via `logger.debug('[ssrf] OK     host="%s" → "%s"', ...)` instead of the previous `console.log()` guarded by a manual `NODE_ENV !== 'production'` check. The explicit `NODE_ENV` guard is removed since pino's built-in log level system handles environment-aware output automatically.
+
+---
+
+## 📄 `sanitization.js`
+
+Input sanitization middleware for Express routes. Provides two layers of defense: (1) a fail-fast guard against NoSQL injection and prototype pollution in `req.body`, rejecting suspect requests with HTTP 400; and (2) in-place string sanitization that strips HTML tags, trims whitespace, and escapes dangerous characters (`<`, `>`, `&`). Skips credential fields (`password`, `totpSecret`) so they pass through untouched. Skips numeric fields (`puerto`, `gpu`, `assignedGpu`, `vram`) to avoid type coercion. All blocked requests are logged via pino for security monitoring.
+
+### Imports and dependencies
+
+| Module | Imported elements | Type |
+|--------|-------------------|------|
+| `../utils/logger.js` | `logger` (default) | Internal |
+
+### Constants
+
+| Constant | Type | Description |
+|----------|------|-------------|
+| `SKIP_SANITIZE_FIELDS` | `Set<string>` | Field names that bypass all string sanitization: `'password'`, `'totpSecret'` |
+| `NUMERIC_FIELDS` | `Set<string>` | Field names that skip string treatment when their value is a number: `'puerto'`, `'gpu'`, `'assignedGpu'`, `'vram'` |
+| `NOSQL_OPERATORS` | `Set<string>` | MongoDB query operators that trigger injection detection: `$gt`, `$gte`, `$lt`, `$lte`, `$ne`, `$eq`, `$regex`, `$exists`, `$type`, `$where`, `$set`, `$unset`, `$push`, `$pull`, `$inc`, `$rename`, `$currentDate`, `$addFields`, `$and`, `$or`, `$nor`, `$not` |
+| `PROTOTYPE_POLLUTION_KEYS` | `Set<string>` | Keys that trigger prototype pollution detection: `'__proto__'`, `'constructor'`, `'prototype'` |
+
+### Functions
+
+- **`escapeHtmlChars(str: string) → string`** *(private)*
+  Replaces `<`, `>`, and `&` with their HTML entity equivalents (`&lt;`, `&gt;`, `&amp;`). Used internally by `sanitizeString()`.
+  - `str`: Raw string input.
+  - **Returns:** String with dangerous characters HTML-escaped.
+
+- **`sanitizeString(str: string, fieldName: string) → { clean: string, changed: boolean }`** *(exported)*
+  Three-step string sanitization pipeline: (1) trims leading/trailing whitespace, (2) strips all HTML tags via regex, (3) escapes remaining `<`, `>`, `&` characters. If `fieldName` is in `SKIP_SANITIZE_FIELDS` (e.g., `'password'`, `'totpSecret'`), returns input unchanged. Returns a descriptor object indicating whether any mutation occurred.
+  - `str`: Raw string value to sanitize.
+  - `fieldName`: The requesting field's name — used as a lookup key against `SKIP_SANITIZE_FIELDS`.
+  - **Returns:** `{ clean: string, changed: boolean }`
+
+- **`hasNoSqlInjection(value: any) → { found: boolean, details: string[] }`** *(exported)*
+  Recursively walks an object or array tree. At each key, checks against `NOSQL_OPERATORS` and `PROTOTYPE_POLLUTION_KEYS`. Collects hit descriptions into a `details` array with dot-path notation (e.g., `"NoSQL operator detected: \"body.$gt\""`, `"Prototype pollution attempt detected: \"__proto__\""`)`. If no threats are found, returns `{ found: false, details: [] }`.
+  - `value`: Any request body value (object, array, or primitive).
+  - **Returns:** `{ found: boolean, details: string[] }`
+
+- **`sanitizeBodyDeep(value: object, fieldName: string) → void`** *(private)*
+  Mutates an object tree in-place. For each string leaf that is not a secret or numeric field, applies `sanitizeString()` and assigns the clean value back. Recurses into nested objects and arrays. Non-object array items (numbers, booleans, etc.) are skipped.
+  - `value`: Request body object to mutate.
+  - `fieldName`: Dot-path prefix for child key resolution (e.g., `'body.service.puerto'`).
+  - **Returns:** nothing — side-effect only.
+
+- **`sanitizeMiddleware(req: Request, res: Response, next: NextFunction) → void | Response`** *(exported)*
+  Express middleware applied on POST/PUT mutation routes before body validation. Two-step operation: (1) calls `hasNoSqlInjection(req.body)` — if threats are found the request is rejected with `400 { success: false, message: 'Request contains forbidden patterns.' }` and a `logger.warn()` entry detailing the blocked patterns; (2) if clean, calls `sanitizeBodyDeep(req.body, '')` to sanitize all string fields in-place. GET/HEAD requests with no body pass through silently via `next()`.
+  - **Returns:** nothing — calls `next()` on success or returns a 400 JSON response on threat detection.
+
+### Routing
+
+Applied per-route (not globally) before validation middleware on mutation endpoints:
+
+| Route file | Method(s) | Wiring position |
+|------------|-----------|-----------------|
+| `routes/auth.js` | All 4 POST handlers (`/register`, `/login`, `/change-password`, etc.) | Before body parsing / validation logic |
+| `routes/pcs.js` | POST, PUT `/api/pcs` | Before `validatePcBody` middleware |
+| `routes/services.js` | POST, PUT `/api/pcs/:pcId/services` | Before route-specific validators |
+| `routes/users.js` | PUT `/api/users/:userId/role` | After `requireAdmin`, before role handler logic |
+
+## 🔄 Changes in this update
+
+- **Task 24 — Input sanitization (`sanitization.js`) added:** New middleware providing defense-in-depth for all mutation routes. Two exported utilities: `hasNoSqlInjection()` — recursive walker that detects MongoDB query operators (`$gt`, `$lt`, `$ne`, `$regex`, etc.) and prototype pollution keys (`__proto__`, `constructor`, `prototype`) in any nested object; and `sanitizeString()` — three-step pipeline that trims, strips HTML tags via regex, and escapes `<>&` entities. Both are wired into `sanitizeMiddleware()`, which acts as a fail-fast guard: on threat detection, rejects with 400 and logs via pino. A private helper `sanitizeBodyDeep()` mutates `req.body` in-place to clean string fields, while respecting `SKIP_SANITIZE_FIELDS` (password, totpSecret) and `NUMERIC_FIELDS` (puerto, gpu, assignedGpu, vram). Applied selectively on POST/PUT routes in auth.js (4 endpoints), pcs.js (POST/PUT pre validatePcBody), services.js (POST/PUT pre validator), and users.js (PUT role post requireAdmin). No external dependencies — uses only built-in approaches plus the shared pino logger.
 
 ---
 

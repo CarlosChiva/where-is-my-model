@@ -1,12 +1,12 @@
 # `services`
 
 > Path: `backend/services`
-> Last updated: 2026-07-16
+> Last updated: 2026-07-19 (email verification feature fully removed — emailService.js deleted, nodemailer dependency removed)
 > Type: Leaf folder
 
-Contains pure service-layer utilities for the backend — currently a health-checking module that probes TCP ports and optional HTTP endpoints of managed PCs and their embedded services. Outbound connections are protected against Server-Side Request Forgery (SSRF) via pre-connection DNS resolution and IP validation (`ssrfProtection.js`). Uses only Node.js built-in `net` and native `fetch`, plus the shared SSRF middleware module.
+ Contains application-level service utilities for the backend: a health-checking module that probes TCP ports and optional HTTP endpoints of managed PCs and their embedded services (`healthChecker.js`). Outbound connections from the health checker are protected against Server-Side Request Forgery (SSRF) via pre-connection DNS resolution and IP validation (`ssrfProtection.js`).
 
----
+
 
 ## 📄 `healthChecker.js`
 
@@ -65,3 +65,16 @@ The SSRF protection is integrated at the lowest level (`checkServiceStatus`) so 
 ## 🔄 Changes in this update
 
 - **Task 12 — SSRF protection integrated into healthChecker.js:** Added `import { resolveAndValidate } from '../middleware/ssrfProtection.js'`. Updated `checkServiceStatus()` to call `resolveAndValidate(host)` before opening any TCP socket. On SSRF denial, the function resolves immediately with `{ port, status: 'down' }`. On validation success, the resolved IP address (not the original hostname) is passed to both `net.createConnection()` and `checkHttpEndpoint()`, preventing DNS rebinding attacks between validation and connection time. Updated imports table and file-level description to reflect SSRF capabilities and the new internal dependency on `ssrfProtection.js`.
+
+---
+
+## 🔄 Changes in this update
+
+- **Task 15 — Bug fix: `emailService.js` import path corrected:** The Logger import on line 2 was changed from `'../../utils/logger.js'` (incorrect, one directory level too deep) to `'../utils/logger.js'` (correct relative path from `backend/services/`). This bug was blocking the entire auth router (`routes/auth.js`) from loading during dynamic import in `server.js:RegisterRoutes()`, which in turn prevented the `/api/auth/*` endpoints from being registered — effectively disabling registration, login, and all authentication flows at startup. The fix ensures the module resolves cleanly on import. Full documentation for `emailService.js` added to this file, including both exported functions (`getTransporter()` and `sendVerificationEmail()`) with parameter types, return types, and behavioral descriptions covering lazy transport caching, graceful SMTP degradation, and verification email construction.
+
+## 🔄 Changes in this update
+
+- **Email verification feature fully removed:** The entire email verification subsystem has been deleted from the project:
+  - **`emailService.js` deleted entirely** — the file no longer exists. It previously provided `getTransporter()` (lazy Nodemailer transport) and `sendVerificationEmail()` for sending bilingual verification links during user registration. All full documentation of its functions has been removed from this file.
+  - **Folder-level description updated** — removed references to "SMTP-based email delivery module" and "graceful degradation when SMTP is not configured."
+  - The only remaining service in this folder is `healthChecker.js`.
