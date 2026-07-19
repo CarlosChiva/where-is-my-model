@@ -1,4 +1,4 @@
-const API_BASE = '/api';
+const API_BASE = '/api/v1';
 
 /* ------------------------------------------------------------------ */
 /*  Circuit breaker: only one in-flight refresh at a time              */

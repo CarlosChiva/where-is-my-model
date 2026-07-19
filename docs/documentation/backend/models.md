@@ -1,7 +1,7 @@
 # `models`
 
 > Path: `backend/models/`
-> Last updated: 2026-07-16 (Task 21 — TOTP 2FA fields)
+> Last updated: 2026-07-18 (email verification fields removed from User.js)
 > Type: Leaf folder
 
 Mongoose schema definitions for the Express backend. Contains data models that map to MongoDB collections, implementing validation at both field-level and document-level for GPU server infrastructure entities. The single model defined here manages multi-GPU servers with per-GPU VRAM allocation tracking across assigned network services.

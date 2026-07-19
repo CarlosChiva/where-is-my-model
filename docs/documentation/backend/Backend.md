@@ -1,7 +1,7 @@
 # `backend`
 
 > Path: `backend/`
-> Last updated: 2026-07-18
+> Last updated: 2026-07-18 (email verification cleanup removed from server.js)
 > Type: Composite folder
 
 Express + Mongoose REST API server that manages GPU compute servers and their assigned network services. The backend enforces per-GPU VRAM capacity constraints at the schema level (Mongoose validators), middleware level (request-body validation), and route level (error handling). Deployed as a Node.js 20 Alpine container via Docker Compose, backed by MongoDB for persistent storage. Multi-GPU servers are fully supported — each GPU is individually tracked with its own VRAM allocation pool, and services can be reassigned between GPUs on the same server via partial-update routes.
@@ -14,9 +14,10 @@ Express + Mongoose REST API server that manages GPU compute servers and their as
 |--------|--------------|-------------|
 | `models/` | [see docs](./models.md) | Mongoose schema definitions for the PC model (multi-GPU servers with embedded service subdocuments, per-GPU virtual fields, and document-level VRAM-cap validators). |
 | `routes/` | [see docs](./routes.md) | Express Router modules providing CRUD REST endpoints for PCs (`/api/pcs`) and nested Services (`/api/pcs/:pcId/services`), authentication flows at `/api/auth` (with cookie-based two-token rotation and 2FA intercept), TOTP-based 2FA management at `/api/auth/2fa`, admin user listing at `/api/users`, and TCP health checks at `/api/check-health`. Standardized response envelopes and CastError handling. |
-| `middleware/` | [see docs](./middleware.md) | Request-body validation middleware (collect-all-errors pattern) enforcing per-GPU VRAM limits, IPv4 format checks, and legacy vram-to-gpus-array transformation. Also includes rate-limiting middleware (`express-rate-limit`) with three tiered limiters for global API, authentication endpoints, and health probes. Plus request-ID tracking middleware (`requestId.js`) guaranteeing a UUID on every request and echoing it via the `X-Request-ID` response header for distributed-tracing correlation. |
-| `services/` | [see docs](./services.md) | Application-level services — TCP health-check utility (`healthChecker.js`) for probing the reachability of network services hosted on GPU compute servers, using only Node.js built-in `net`. |
+| `middleware/` | [see docs](./middleware.md) | Request-body validation middleware (collect-all-errors pattern) enforcing per-GPU VRAM limits, IPv4 format checks, and legacy vram-to-gpus-array transformation. Rate-limiting middleware (`express-rate-limit`) with three tiered limiters for global API, authentication endpoints, and health probes. Request-ID tracking middleware (`requestId.js`) guaranteeing a UUID on every request and echoing it via the `X-Request-ID` response header for distributed-tracing correlation. Input sanitization middleware (`sanitization.js`) that strips HTML tags, escapes dangerous characters, blocks NoSQL injection operators (`$gt`, etc.), and prevents prototype pollution (`__proto__`, `constructor`, `prototype`) — applied on all mutation routes (POST/PUT) before body validation. |
+| `services/` | [see docs](./services.md) | Application-level services — TCP health-check utility (`healthChecker.js`) for probing the reachability of network services hosted on GPU compute servers using Node.js built-in `net`, protected against SSRF via `ssrfProtection.js`. The SMTP email delivery module (`emailService.js`) has been fully removed as part of deprecating the email verification feature. |
 | `utils/` | [see docs](./utils.md) | Shared logging infrastructure — Pino logger singleton, `pino-http` middleware factory with sensitive query-parameter stripping and distributed-tracing request ID generation (via `genReqId` callback using RFC 4122 UUID validation), and URL sanitization for access-log hygiene. |
+| `scripts/` | [see docs](./scripts.md) | CLI utility scripts — automated MongoDB backup via `mongodump --gzip` with age-based retention management (`backup.js`), plus idempotent admin user seeding helper (`seedAdmin.js`). |
 
 ---
 
@@ -24,7 +25,7 @@ Express + Mongoose REST API server that manages GPU compute servers and their as
 
 ### `server.js`
 
-Application entry point. Loads environment configuration, constructs the MongoDB connection URI dynamically via `buildMongoUri()` (supports both authenticated mode for Docker Compose deployments and unauthenticated mode for local development), performs startup validation of required secrets (JWT_SECRET, JWT_EXPIRES_IN, JWT_REFRESH_SECRET, JWT_REFRESH_EXPIRES_IN), establishes the MongoDB connection via Mongoose, registers Express middleware in order — Helmet security headers, CORS with origin allowlist, pino-http logging middleware (`createHttpLogger()` from `utils/logger.js`) for HTTP request/response logging with URL sanitization and distributed-tracing request ID generation, request ID tracing middleware (`requestId` from `middleware/requestId.js`) guaranteeing `req.id` presence and echoing `X-Request-ID` in every response, cookie parsing via `cookie-parser`, JSON body parsing, global rate limiting — serves a simple inline health check (`GET /api/health`), mounts six route modules in dependency-safe order (twoFactor first to prevent parameter collision, then auth, users, health, services before PCs), installs a global error handler that includes `requestId` in every JSON error envelope for log correlation, and starts listening on the configured port. Trusts the first reverse proxy for forwarded headers.
+Application entry point. Loads environment configuration, constructs the MongoDB connection URI dynamically via `buildMongoUri()` (supports both authenticated mode for Docker Compose deployments and unauthenticated mode for local development), performs startup validation of required secrets (JWT_SECRET, JWT_EXPIRES_IN, JWT_REFRESH_SECRET, JWT_REFRESH_EXPIRES_IN), establishes the MongoDB connection via Mongoose, registers Express middleware in order — Helmet security headers (with explicit `permissionsPolicy` directive blocking camera, microphone, geolocation, payment, usb, magnetometer, gyroscope, accelerometer, and pictureInPicture for all origins; fullscreen allowed same-origin only; reduces XSS attack surface), CORS with origin allowlist, pino-http logging middleware (`createHttpLogger()` from `utils/logger.js`) for HTTP request/response logging with URL sanitization and distributed-tracing request ID generation, request ID tracing middleware (`requestId` from `middleware/requestId.js`) guaranteeing `req.id` presence and echoing `X-Request-ID` in every response, cookie parsing via `cookie-parser`, JSON body parsing, global rate limiting — serves a simple inline health check (`GET /api/health`), mounts six route modules in dependency-safe order (twoFactor first to prevent parameter collision, then auth, users, health, services before PCs), installs a global error handler that includes `requestId` in every JSON error envelope for log correlation, and starts listening on the configured port. Trusts the first reverse proxy for forwarded headers.
 
 ### Imports and dependencies
 
@@ -216,6 +217,7 @@ Single-stage Docker image for production deployment. Based on Node.js 20 Alpine 
 | Layer | Command(s) | Cache sensitivity |
 |-------|-----------|-------------------|
 | Base image | `FROM node:20-alpine` | — |
+| Layer 0 | `RUN apk add --no-cache mongodb-database-tools` | Cached unless Dockerfile changes. Installs `mongodump`/`mongorestore` required by `scripts/backup.js`. Placed before `USER appuser` switch so non-root user can execute the binaries. |
 | Dependencies | `COPY package*.json ./` → `RUN npm install --production` | Cached unless `package.json` or `package-lock.json` change |
 | Application | `COPY . .` | Rebuilt on every Docker build (overridden by volume mount in dev) |
 
@@ -262,6 +264,7 @@ Node.js project manifest. Declares the backend as an ES module (`"type": "module
 |--------|---------|---------|
 | `start` | `node server.js` | Start the API server in production mode |
 | `seed` | `node seed.js` | Populate MongoDB with initial GPU server data from `data.json` |
+| `backup` | `node scripts/backup.js` | Create a timestamped, gzip-compressed MongoDB backup via mongodump; enforces age-based retention (default 7 days) |
 
 ### Dependencies
 
@@ -272,7 +275,7 @@ Node.js project manifest. Declares the backend as an ES module (`"type": "module
 | `express-rate-limit` | `^7.5.0` | Rate limiting — protects against brute-force attacks and API abuse with configurable per-IP throttling |
 | `cors` | ^2.8.5` | Cross-Origin Resource Sharing — origin-restricted preflight support |
 | `cookie-parser` | `^1.4.7` | Cookie parsing middleware — reads `req.cookies` from incoming HTTP requests, enabling cookie-based session management (access/refresh tokens, temp 2FA sessions) |
-| `helmet` | `^8.0.0` | Security headers middleware — sets CSP, X-Frame-Options, HSTS, X-Content-Type-Options, Referrer-Policy, Permissions-Policy, and more |
+| `helmet` | `^8.0.0` | Security headers middleware — sets CSP, X-Frame-Options, HSTS, X-Content-Type-Options, Referrer-Policy, Permissions-Policy (camera, microphone, geolocation, payment, usb, magnetometer, gyroscope, accelerometer, pictureInPicture blocked; fullscreen same-origin only), and more |
 | `dotenv` | `^16.4.0` | Environment variable loading from `.env.development` |
 | `bcryptjs` | `^3.0.3` | Password hashing for user authentication (pre-save hook in User model) |
 | `jsonwebtoken` | `^9.0.3` | JSON Web Token generation and verification for session-based auth |
@@ -306,6 +309,13 @@ Developers should copy this file to `.env.development` and fill in the real valu
 | `CLIENT_URL` | `http://localhost:3000` | Comma-separated list of allowed CORS origins |
 | `JWT_SECRET` | `CHANGE_ME_GENERATE_A_STRONG_SECRET` | JWT signing secret — MUST be at least 64 characters. Generate with: `openssl rand -base64 48` |
 | `JWT_EXPIRES_IN` | `1d` | JWT token lifetime (e.g., `1h`, `1d`, `7d`) |
+| `JWT_REFRESH_SECRET` | *(placeholder)* | Separate secret for signing refresh tokens — MUST be at least 64 characters |
+| `JWT_REFRESH_EXPIRES_IN` | `7d` | Refresh token lifetime |
+| `HEALTH_CHECK_ALLOWED_NETWORKS` | *(empty)* | CIDR allowlist for outbound health-check probes (SSRF protection) |
+| `ADMIN_USERNAME` | `changeme_admin_user` | Initial admin username — used on first startup to seed an admin account |
+| `ADMIN_PASSWORD` | *(placeholder)* | Initial admin password — WARNING: secret value, never commit real credentials |
+| `BACKUP_DIR` | `/backups` | Directory where mongodump creates timestamped backup folders. Mount a persistent volume here in production so backups survive container restarts. Default fallback: `<os.tmpdir()>/where-is-my-model-backups`. |
+| `BACKUP_RETENTION_DAYS` | `7` | Number of days to retain backups before automatic cleanup by `scripts/backup.js`. |
 
 ### `.env.development`
 
@@ -470,8 +480,13 @@ Role enforcement is active on the following route groups:
 ```
 Client request
     │
-    ├─→ Helmet middleware (security headers: CSP, X-Frame-Options, HSTS, etc.)
-    │       Configuration: crossOriginOpenerPolicy: same-origin, xXssProtection: false
+    ├─→ Helmet middleware (security headers: CSP, X-Frame-Options, HSTS, Permissions-Policy, etc.)
+    │       Configuration overrides:
+    │       - crossOriginOpenerPolicy: same-origin
+    │       - permissionsPolicy: blocks camera, microphone, geolocation, payment, usb,
+    │         magnetometer, gyroscope, accelerometer, pictureInPicture for all origins;
+    │         fullscreen allowed same-origin only — reduces XSS attack surface
+    │       - xXssProtection: false (deprecated header, disabled to avoid browser warnings)
     │
     ├─→ CORS middleware (origin whitelist from CLIENT_URL)
     │
@@ -489,6 +504,14 @@ Client request
     ├─→ express.json() (body parsing; errors → global 400 handler)
     │
     ├─→ globalLimiter (rate limiting on all /api/* routes — 100 req/15 min per IP)
+    │
+    ├─→ Input sanitization middleware (sanitizeMiddleware — middleware/sanitization.js)
+    │       Applied on POST/PUT mutation routes before validation. Strips HTML tags,
+    │       escapes < > & characters, blocks NoSQL operators ($gt, $ne, etc.), and
+    │       prevents prototype pollution (__proto__, constructor, prototype).
+    │       Skips password/totpSecret fields for string sanitization; all fields are
+    │       checked for NoSQL injection. Numeric fields (puerto, gpu, assignedGpu, vram)
+    │       bypass string treatment. Every blocked request is logged via pino.
     │
     ├─→ Route-specific validation middleware (routes use it: backend/middleware/validation.js)
     │       │
@@ -530,8 +553,9 @@ The Dockerfile produces a single-stage Node.js 20 Alpine image. In development, 
 |-------------|--------------|---------|
 | `server.js` | `node server.js` or `docker compose up backend` | Main API server |
 | `seed.js` | `npm run seed` or `docker compose exec backend node seed.js` | Database initial data population from `data.json` |
+| `scripts/backup.js` | `npm run backup` or `docker compose exec backend npm run backup` | MongoDB backup via mongodump --gzip with retention management (cron/CI integration, exit 0 success / exit 1 failure) |
 | `test-gpu-cap.js` | `node test-gpu-cap.js [BASE_URL]` | Node.js integration test for VRAM-cap enforcement |
-| `test-gpu-cap.sh` | `./test-gpu-cap.sh [BASE_URL]` | Shell-based integration test (same coverage as .js variant)
+| `test-gpu-cap.sh` | `./test-gpu-cap.sh [BASE_URL]` | Shell-based integration test (same coverage as .js variant) 
 
 ---
 
@@ -633,3 +657,82 @@ The Dockerfile produces a single-stage Node.js 20 Alpine image. In development, 
   - **Subfolder descriptions updated:** `middleware/` entry now mentions request-ID tracking; `utils/` entry notes distributed-tracing request ID generation.
   - **Request flow diagram updated:** Added requestId middleware step between pino-http and cookieParser.
   - **Global error handler table updated:** All four error response envelopes now document the `requestId: req.id` field.
+
+---
+
+## 🔄 Changes in this update
+
+- **Task 16 — Automated MongoDB backup capability:**
+  - **New file — `scripts/backup.js`:** ESM CLI script for automated database backups using `mongodump --gzip`. Creates timestamped backup folders in a configurable directory (`BACKUP_DIR=/backups`), enforces age-based retention (`BACKUP_RETENTION_DAYS=7` default), uses safe `execFile` with array arguments (no shell injection vector), structured logging via shared pino logger, and proper exit codes for cron/CI integration (0 success / 1 failure). Full documentation in [scripts.md](./scripts.md).
+  - **New file — `docs/documentation/backend/scripts.md`:** Leaf documentation covering both `scripts/backup.js` and `scripts/seedAdmin.js` with full function signatures, parameter descriptions, and configuration tables.
+  - **Subfolder table updated:** New `scripts/` entry added with link to `./scripts.md`.
+  - **Dockerfile — Layer 0 added:** `RUN apk add --no-cache mongodb-database-tools` inserted after `WORKDIR /app` and before the `USER appuser` switch. This installs `mongodump`/`mongorestore` binaries required by the backup script while ensuring the non-root user retains execute permissions. Updated build layers table accordingly.
+  - **`package.json` — New npm script:** `"backup": "node scripts/backup.js"` added to the scripts section. Updated npm scripts table with this entry.
+  - **`.env.example` — Backup configuration variables appended:** Two new optional variables documented: `BACKUP_DIR=/backups` (backup output directory, should be mounted to persistent volume in production) and `BACKUP_RETENTION_DAYS=7` (auto-cleanup threshold). Updated `.env.example` variable table accordingly.
+  - **Entry points table updated:** Added row for `scripts/backup.js` with invocation commands (`npm run backup` or via docker compose exec).
+
+---
+
+## 🔄 Changes in this update
+
+- **Task 15 — Bug fix: `emailService.js` import path corrected and documented:** A blocking startup bug was fixed in `backend/services/emailService.js`. The logger import on line 2 was changed from `'../../utils/logger.js'` (incorrect, one directory level too deep) to `'../utils/logger.js'` (correct relative path from `backend/services/`). This bug prevented the entire auth router (`routes/auth.js`) from loading during dynamic import in `server.js::registerRoutes()`, which disabled all `/api/auth/*` endpoints at startup — effectively breaking registration, login, and authentication. Full documentation for `emailService.js` has been added to [services.md](./services.md), including both exported functions with parameter types, return types, and behavioral descriptions (lazy transport caching, graceful SMTP degradation, verification email construction). The subfolder description for `services/` in this file's table has been updated to reflect the presence of both `emailService.js` and `healthChecker.js`.
+
+---
+
+## 🔄 Changes in this update
+
+- **Task 24 — Input sanitization layer added (new middleware file `middleware/sanitization.js`):**
+  - **New file — `backend/middleware/sanitization.js`:** Express middleware module that provides defense-in-depth against XSS, NoSQL injection, and prototype pollution. Exports three public functions:
+    - **`sanitizeMiddleware(req, res, next)`** — Express middleware function. Two-phase inspection of `req.body`:
+      1. Calls `hasNoSqlInjection()` to recursively detect MongoDB query operators (`$gt`, `$gte`, `$lt`, `$lte`, `$ne`, `$eq`, `$regex`, `$exists`, `$type`, `$where`, `$set`, `$unset`, `$push`, `$pull`, `$inc`, `$rename`, `$currentDate`, `$addFields`, `$and`, `$or`, `$nor`, `$not`) and prototype-poisoning keys (`__proto__`, `constructor`, `prototype`). If any are found, returns HTTP 400 with `{ success: false, message: 'Request contains forbidden patterns.' }` and logs the event via pino.
+      2. Calls `sanitizeBodyDeep()` which mutates `req.body` in-place — trims whitespace, strips HTML tags via regex `<[^>]*(?:>[^<]*)*>`, and escapes remaining dangerous characters (`& → &amp;`, `< → &lt;`, `> → &gt;`). Skips `password` and `totpSecret` fields for string sanitization (but still scans them for NoSQL injection). Numeric fields (`puerto`, `gpu`, `assignedGpu`, `vram`) bypass string treatment entirely.
+    - **`sanitizeString(str, fieldName) → { clean: string, changed: boolean }`** — Pure function that trims, strips HTML tags, and escapes `< > &`. Returns both the cleaned string and a mutation flag. Skips fields in `SKIP_SANITIZE_FIELDS` set (`password`, `totpSecret`).
+    - **`hasNoSqlInjection(value) → { found: boolean, details: string[] }`** — Pure function that recursively walks an object/array tree detecting MongoDB operators and prototype-poisoning keys. Returns a flag and an array of human-readable detection messages with full dotted paths (e.g., `"NoSQL operator detected: \"body.$gt\"" `).
+  - Private helper `escapeHtmlChars(str)` handles the HTML entity substitution (`&`, `<`, `>`).
+  - Private recursive function `sanitizeBodyDeep(value, fieldName)` performs in-place mutation of string leaves within an object tree.
+  - **Routes updated — sanitizeMiddleware applied on all POST/PUT handlers:** Four route modules now import and chain `sanitizeMiddleware` after rate-limiting / authentication middleware but before body validation:
+    | Route file | Affected endpoints | Position in middleware chain |
+    |-----------|-------------------|------------------------------|
+    | `routes/auth.js` | `POST /register`, `POST /login`, `POST /refresh` | After `authLimiter`, before handler |
+    | `routes/pcs.js` | `POST /`, `PUT /:id` | After `requireAdmin`, before `validatePcBody` |
+    | `routes/services.js` | `POST /`, `PUT /:serviceIndex` | After `requireAdmin`, before `validateServiceBody` / `validateServiceUpdate` |
+    | `routes/users.js` | `PUT /:userId/role` | After `requireAdmin`, before handler |
+  - **Subfolder description updated:** The `middleware/` entry in the subfolders table now documents the input sanitization middleware alongside existing entries (validation, rate limiting, request ID).
+  - **Request flow diagram updated:** Added "Input sanitization middleware" step between global rate limiting and route-specific validation in the architecture overview's request flow diagram. This reflects that sanitized bodies reach downstream validators in a cleaned state.
+
+---
+
+## 🔄 Changes in this update
+
+- **Task 25 — `permissionsPolicy` directive added to Helmet.js configuration (`server.js` lines 96-113):**
+  - **Purpose:** Explicitly restrict browser feature access via the W3C Permissions Policy standard, reducing the attack surface for XSS exploits that attempt to invoke device-hardware APIs (camera streams, microphone capture, geolocation leakage, USB device enumeration, inertial sensors).
+  - **Helmet `permissionsPolicy` block** — ten features governed:
+
+    | Feature | Policy | Rationale |
+    |---------|--------|-----------|
+    | `camera` | `[]` (blocked for all origins) | No webcam access — application has no video-capture functionality. |
+    | `microphone` | `[]` (blocked for all origins) | No audio-capture — prevents rogue scripts from recording ambient sound via XSS vectors. |
+    | `geolocation` | `[]` (blocked for all origins) | No location data needed — prevents browser geolocation prompts or silent coordinate leakage. |
+    | `payment` | `[]` (blocked for all origins) | Not a payment application — disables Payment Request API surface. |
+    | `usb` | `[]` (blocked for all origins) | No USB device interaction — blocks USB Device API enumeration. |
+    | `magnetometer` | `[]` (blocked for all origins) | No orientation sensing — prevents sensor abuse via XSS in mobile browsers. |
+    | `gyroscope` | `[]` (blocked for all origins) | No rotation sensing — same rationale as magnetometer. |
+    | `accelerometer` | `[]` (blocked for all origins) | No motion sensing — same rationale as magnetometer. |
+    | `fullscreen` | `['self']` (same-origin only) | Allows the application itself to go fullscreen if needed, but prevents third-party iframes from hijacking display mode. |
+    | `pictureInPicture` | `[]` (blocked for all origins) | No video playback — disables PiP API surface. |
+
+  - **Integration:** The policy is defined inline within the existing `helmet()` middleware options object in `server.js`. It sits alongside the existing `crossOriginOpenerPolicy` and `xXssProtection` overrides — no new imports or dependencies introduced.
+  - **Request flow diagram updated:** The Helmet step now lists Permissions-Policy among the active security headers, with a note that device-feature APIs are restricted to reduce XSS impact.
+  - **Dependencies table updated:** The `helmet` entry now enumerates the ten governed permissions-policy features.
+
+---
+
+## 🔄 Changes in this update
+
+- **Email verification cleanup removed from `server.js`:** The automatic deprovisioning of stale pending users has been fully removed from the server startup sequence:
+  - **Removed import:** `import User from './models/User.js'` — the User model was imported directly at the top level solely to support the cleanup function. It is no longer needed in `server.js` (the routes that access User import it themselves).
+  - **Removed constant:** `SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000` — time threshold used by the cleanup query.
+  - **Removed function:** entire `cleanupUnverifiedUsers()` including comment headers. This function called `User.deleteMany()` with a compound filter (`role: 'pending'`, `emailVerified: false`, `createdAt: { $lt: sevenDaysAgo }`) to purge unverified accounts older than one week.
+  - **Removed startup call:** `await cleanupUnverifiedUsers()` was invoked synchronously at the beginning of `start()`, immediately after MongoDB connection and before route registration, causing startup delay proportional to the number of stale user documents.
+  - **Removed periodic scheduler:** `setInterval(cleanupUnverifiedUsers, 24 * 60 * 60 * 1000)` — a recurring cleanup task running every 24 hours during the entire lifetime of the process. No orphaned interval timers remain.
+  - The remaining startup sequence (MongoDB connect → seedAdmin → registerRoutes → global error handler install → listen) is intact and unchanged by this removal.
