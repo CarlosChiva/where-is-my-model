@@ -30,19 +30,3 @@ export const healthLimiter = rateLimit({
   legacyHeaders: false,
   handler: tooManyRequestsHandler,
 });
-
-const resendTooManyRequestsHandler = (_req, res) => {
-  res.status(429).json({
-    success: false,
-    message: 'Too many resend attempts. Please try again in one hour.',
-  });
-};
-
-export const resendLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000,  // 1 hour
-  max: 3,                    // 3 requests per email per hour
-  keyGenerator: (req) => req.body.email?.trim().toLowerCase() || 'unknown',
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: resendTooManyRequestsHandler,
-});

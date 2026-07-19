@@ -14,10 +14,8 @@ import { globalLimiter } from './middleware/rateLimit.js';
 import requestId from './middleware/requestId.js';
 import versionMiddleware from './middleware/versionMiddleware.js';
 import logger, { createHttpLogger } from './utils/logger.js';
-import User from './models/User.js';
 
 const API_PREFIX = '/api/v1';
-const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
 /* ------------------------------------------------------------------ */
 /*  Configuration                                                     */
@@ -226,29 +224,6 @@ async function registerRoutes() {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Cleanup: remove unverified pending users older than 7 days        */
-/* ------------------------------------------------------------------ */
-
-async function cleanupUnverifiedUsers() {
-  try {
-    const sevenDaysAgo = new Date(Date.now() - SEVEN_DAYS_MS);
-    const result = await User.deleteMany({
-      role: 'pending',
-      emailVerified: false,
-      createdAt: { $lt: sevenDaysAgo },
-    });
-    if (result.deletedCount > 0) {
-      logger.info(
-        '[server] Cleaned up %d unverified user(s) older than 7 days',
-        result.deletedCount
-      );
-    }
-  } catch (err) {
-    logger.warn('[server] Cleanup of unverified users failed:', err.message);
-  }
-}
-
-/* ------------------------------------------------------------------ */
 /*  MongoDB connection and server startup                             */
 /* ------------------------------------------------------------------ */
 
@@ -262,12 +237,6 @@ async function start() {
     logger.error('[server] MongoDB connection failed:', err.message);
     process.exit(1);
   }
-
-  /* --- Remove stale unverified users at startup ------------------- */
-  await cleanupUnverifiedUsers();
-
-  /* --- Periodic cleanup every 24 hours ---------------------------- */
-  setInterval(cleanupUnverifiedUsers, 24 * 60 * 60 * 1000);
 
   /* --- Seed initial admin user before routes are registered ------ */
   try {
