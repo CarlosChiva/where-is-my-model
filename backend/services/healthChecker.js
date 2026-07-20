@@ -1,4 +1,6 @@
 import net from 'net';
+import { resolveAndValidate } from '../middleware/ssrfProtection.js';
+import logger from '../utils/logger.js';
 
 /* ------------------------------------------------------------------ */
 /*  checkHttpEndpoint — HTTP GET probe against a specific endpoint    */
@@ -21,7 +23,7 @@ async function checkHttpEndpoint(host, port, endpoint, protocol) {
     clearTimeout(timeoutId);
     return response.status >= 200 && response.status < 400;
   } catch (err) {
-    console.warn(
+    logger.warn(
       `[health] http:${protocol}://${host}:${port}${endpoint}` +
       ` ${err.code ?? err.message}`
     );
@@ -39,35 +41,45 @@ async function checkHttpEndpoint(host, port, endpoint, protocol) {
 
 function checkServiceStatus(host, port, endpoint, protocol) {
   return new Promise((resolve) => {
-    const socket = net.createConnection({ host, port }, async () => {
-      socket.destroy();
-
-      /* TCP succeeded — if no endpoint, immediately report 'up' */
-      if (!endpoint) {
-        resolve({ port, status: 'up' });
+    /* --- Pre-connection SSRF guard (DNS + IP validation) --------- */
+    resolveAndValidate(host).then(({ allowed, ip }) => {
+      if (!allowed) {
+        resolve({ port, status: 'down' });
         return;
       }
 
-      /* Two-tier check: validate HTTP response */
-      const httpOk = await checkHttpEndpoint(host, port, endpoint, protocol || 'http');
-      resolve({ port, status: httpOk ? 'up' : 'down' });
-    });
+      /* Use the resolved IP for the actual TCP connection           */
+      /* (prevents DNS rebinding between validation and connect).    */
+      const socket = net.createConnection({ host: ip ?? host, port }, async () => {
+        socket.destroy();
 
-    socket.setTimeout(3000);
+        /* TCP succeeded — if no endpoint, immediately report 'up' */
+        if (!endpoint) {
+          resolve({ port, status: 'up' });
+          return;
+        }
 
-    socket.on('timeout', () => {
-      socket.destroy();
-      resolve({ port, status: 'down' });
-    });
+        /* Two-tier check: validate HTTP response                   */
+        const httpOk = await checkHttpEndpoint(ip ?? host, port, endpoint, protocol || 'http');
+        resolve({ port, status: httpOk ? 'up' : 'down' });
+      });
 
-    socket.on('error', (err) => {
-      socket.destroy();
-      if (err.code !== 'ECONNRESET') {
-        console.warn(
-          `[health] port:${port} ${err.code ?? err.message}`
-        );
-      }
-      resolve({ port, status: 'down' });
+      socket.setTimeout(3000);
+
+      socket.on('timeout', () => {
+        socket.destroy();
+        resolve({ port, status: 'down' });
+      });
+
+      socket.on('error', (err) => {
+        socket.destroy();
+        if (err.code !== 'ECONNRESET') {
+          logger.warn(
+            `[health] port:${port} host="${host}" ip="${ip ?? 'unknown'}" ${err.code ?? err.message}`
+          );
+        }
+        resolve({ port, status: 'down' });
+      });
     });
   });
 }

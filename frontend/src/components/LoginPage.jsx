@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { isPasswordStrong, validatePasswordStrength } from '../utils/validators.js';
 
 export default function LoginPage() {
   const { login, register, isLoading } = useAuth();
@@ -18,11 +19,17 @@ export default function LoginPage() {
   const [apiError, setApiError] = useState(null);
   const [registrationPending, setRegistrationPending] = useState(false);
 
+  /* ── Derived: password strength (computed during render) ─────────── */
+  const strength = mode === 'register' ? validatePasswordStrength(password) : null;
+
   /* ── Validation ─────────────────────────────────────────────── */
   const validate = () => {
     const errors = {};
     if (!username.trim()) errors.username = 'Username is required.';
     if (!password)       errors.password = 'Password is required.';
+    else if (mode === 'register' && !isPasswordStrong(password)) {
+      errors.password = 'Password does not meet complexity requirements.';
+    }
     setFieldErrors(errors);
     return Object.keys(errors).length === 0;
   };
@@ -131,12 +138,42 @@ export default function LoginPage() {
                   : 'border-border focus:border-accent'
               }`}
             />
+            {/* ── Strength indicator (register mode only) ─────────── */}
+            {mode === 'register' && strength != null && password.length > 0 && (
+              <div className="mt-2">
+                <div className="flex gap-1 mb-1.5">
+                  {[0, 1, 2, 3, 4].map((i) => (
+                    <div
+                      key={i}
+                      className={`h-1 flex-1 rounded-full transition-colors duration-200 ${
+                        i < strength.score
+                          ? strength.score <= 1
+                            ? 'bg-danger'
+                            : strength.score <= 3
+                              ? 'bg-yellow-500'
+                              : 'bg-green-500'
+                          : 'bg-bg-input border border-border'
+                      }`}
+                    />
+                  ))}
+                </div>
+                <p className={`text-xs ${
+                  strength.score >= 4
+                    ? 'text-green-600 dark:text-green-400'
+                    : 'text-text-muted'
+                }`}>
+                  {strength.score >= 4
+                    ? 'Strong password'
+                    : `Need at least 12 chars: upper, lower, digit, special ( @$!%*?&# )`}
+                </p>
+              </div>
+            )}
             {fieldErrors.password && (
               <p className="mt-1 text-sm text-danger">{fieldErrors.password}</p>
             )}
           </div>
 
-          {/* API Error */}
+    {/* API Error */}
           {apiError && (
             <div className="mb-4 p-3 bg-danger/10 border border-danger/30 rounded-md">
               <p className="text-sm text-danger">{apiError}</p>

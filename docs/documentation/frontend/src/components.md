@@ -1,7 +1,7 @@
 # `components`
 
 > Path: `frontend/src/components/`
-> Last updated: 2026-07-12
+> Last updated: 2026-07-16
 > Type: Composite folder
 
 React UI components for the GPU Infrastructure Dashboard. Contains six presentational dashboard components (Header, GPUBar, GPUDetails, ServiceRow, PCCard, PCGrid) that follow a strict unidirectional data-flow pattern: they receive data and callbacks as props, perform no data fetching, and delegate all mutations back to the root `App.jsx`. Includes a `Modals/` subfolder with five modal-dialog components for data-entry, editing, and deletion confirmations. Also includes two full-page standalone components: `LoginPage.jsx` (authentication with tab-based login/register workflows) and `AdminPanel.jsx` (user role management with toggleable admin/user roles).
@@ -263,6 +263,7 @@ Standalone full-page authentication component that provides tab-switching login 
 |--------|-------------------|------|
 | `react` | `useState` | External |
 | `../context/AuthContext` | `useAuth` | Internal |
+| `../utils/validators.js` | `isPasswordStrong`, `validatePasswordStrength` | Internal |
 
 > **Note:** `useEffect` is no longer imported. It was removed along with the hard-redirect logic. LoginPage is now purely a form component — navigation is handled by the parent `<App>` guard.
 
@@ -289,11 +290,18 @@ Destructures three keys from `useAuth()`:
 | `password` | `''` | Controlled password input value. |
 | `fieldErrors` | `{}` | Client-side validation errors keyed by field name (`username`, `password`). Displayed inline below each respective input. |
 | `apiError` | `null` | Server-side error message from the auth API call. Rendered as a styled alert banner above the submit button when truthy. |
+| `registrationPending` | `false` | Boolean flag set when registration returns a pending-approval response. Shows an info banner awaiting admin approval. |
+
+**Derived state (computed during render):**
+
+| Derived value | Computation | Role |
+|---------------|-------------|------|
+| `strength` | `mode === 'register' ? validatePasswordStrength(password) : null` | Object `{ score: 0-5, hasLength, hasLower, hasUpper, hasDigit, hasSpecial }` used to drive the visual password strength indicator. Re-computed on every render whenever `password` or `mode` changes. Set to `null` in login mode so no computation occurs during login. |
 
 **Internal functions:**
 
 - **`validate() → boolean`**
-  Client-side synchronous validation. Checks that `username.trim()` is non-empty and `password` is truthy. Sets `fieldErrors` with descriptive messages for any missing fields. Returns `true` if both fields pass, `false` otherwise.
+  Client-side synchronous validation. Checks that `username.trim()` is non-empty and `password` is truthy. **In register mode only**, additionally checks `isPasswordStrong(password)` — if the password fails complexity requirements, sets a descriptive error on the password field. Sets `fieldErrors` with descriptive messages for any missing fields. Returns `true` if all checks pass, `false` otherwise.
 
 - **`handleSubmit(e: SyntheticEvent) → Promise<void>`**
   Form submission handler (wrapped in `async`). Prevents default, clears `apiError`, runs `validate()`. If validation passes, selects the correct action (`mode === 'login' ? login : register`) and awaits it with trimmed credentials. If the result has an error, updates `apiError` for display. On success: `AuthContext` sets `isLoading → false` and populates `user`, which causes the `<App>` guard to swap out `<LoginPage />` — no redirect logic lives in this component anymore.
@@ -321,6 +329,11 @@ Each input has:
 - Conditional border color: `border-danger focus:border-danger` on validation failure; `border-border focus:border-accent` in normal state.
 - Inline error `<p>` rendered below the input when a field has an error (styled with `text-sm text-danger`).
 - Appropriate `autoComplete` hints (`username`, `current-password` / `new-password`).
+
+**Password strength indicator (register mode only):**
+Rendered between the password input and the inline `fieldErrors.password` message. Visible only when all three conditions are met: `mode === 'register'` AND `strength != null` AND `password.length > 0`. Consists of two elements:
+1. **Five-segment progress bar** — A flex row of five equal-width `<div>` bars, each with `h-1 rounded-full transition-colors duration-200`. Filled segments are colored based on the current `score`: red (`bg-danger`) when `score ≤ 1`, yellow (`bg-yellow-500`) when `score ≤ 3`, green (`bg-green-500`) when `score ≥ 4`. Unfilled segments show a neutral background with a border (`bg-bg-input border border-border`).
+2. **Guidance text** — A `<p>` element in `text-xs` size. When `score >= 4`, displays *"Strong password"* in green (`text-green-600 dark:text-green-400`). Otherwise, displays the full requirement reminder: *"Need at least 12 chars: upper, lower, digit, special ( @$!%*?&# )"* in the muted text color.
 
 **Submit button:**
 Full-width button that is disabled during `isLoading`. Displays an inline SVG spinner (`animate-spin`) and loading text ("Iniciando..." / "Registrando...") while an async operation is in flight. Shows the action label ("Iniciar sesión" / "Registrarse") when idle. Uses accent-filled styling with transition effects and proper disabled-state opacity (`disabled:opacity-50 disabled:cursor-not-allowed`).
@@ -390,6 +403,13 @@ Zero-arg arrow function wired to each row's toggle button. Computes the inverse 
 ---
 
 ## 🔄 Changes in this update
+
+### LoginPage.jsx — Password strength indicator and multi-layer validation
+- **Updated imports:** Added `isPasswordStrong` and `validatePasswordStrength` from `../utils/validators.js`. Imports table now reflects three modules (react, AuthContext, validators).
+- **New derived state — `strength`:** Computed during render as `mode === 'register' ? validatePasswordStrength(password) : null`. Returns a `{ score: number, hasLength: boolean, hasLower: boolean, hasUpper: boolean, hasDigit: boolean, hasSpecial: boolean }` object. Set to `null` in login mode so no computation occurs during login.
+- **Updated `validate()` function:** In register mode only, now checks `isPasswordStrong(password)` — if the password fails complexity requirements, sets a descriptive error (`"Password does not meet complexity requirements."`) on the password field. This is the client-side first-line defense that prevents submitting weak passwords to the backend.
+- **New visual strength indicator:** Rendered below the password input during registration when `password.length > 0`. Consists of a five-segment colored progress bar (red ≤ 1 segment, yellow ≤ 3 segments, green ≥ 4 segments) and guidance text that either shows "Strong password" or the full requirement reminder (`"Need at least 12 chars: upper, lower, digit, special (@$!%*?&#)"`). Uses `transition-colors duration-200` for smooth segment animations.
+- **Password validation chain:** Together with backend changes, this completes a three-layer validation approach: (1) client-side strength indicator blocks submission via `isPasswordStrong()` in LoginPage.jsx; (2) synchronous route guard (`PASSWORD_REGEX.test()`) in auth.js prevents wasted bcrypt hashing and DB round-trips; (3) Mongoose schema validator on User.js model catches any malformed passwords that bypass both prior layers before persistence.
 
 ### LoginPage.jsx — Removed hard reload and auth self-redirect logic
 - **Removed** the `useEffect` redirect block that used `window.location.href = '/'` when `isAuthenticated` became `true`. This hard navigational reload caused a full page refresh, losing all React component state, memoization caches, and scroll position.

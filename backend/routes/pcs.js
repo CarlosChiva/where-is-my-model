@@ -2,6 +2,8 @@ import express from 'express';
 import PC from '../models/PC.js';
 import { validatePcBody } from '../middleware/validation.js';
 import { authMiddleware, requireAdmin } from '../middleware/auth.js';
+import logger from '../utils/logger.js';
+import { sanitizeMiddleware } from '../middleware/sanitization.js';
 
 const router = express.Router();
 
@@ -14,7 +16,7 @@ router.get('/', authMiddleware, async (req, res) => {
     const pcs = await PC.find().lean();
     res.json({ success: true, data: pcs });
   } catch (err) {
-    console.error('[pcs] GET / error:', err);
+    logger.error('[pcs] GET / error:', err);
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
@@ -34,7 +36,7 @@ router.get('/:id', authMiddleware, async (req, res) => {
     if (err.name === 'CastError') {
       return res.status(400).json({ success: false, message: 'Invalid PC ID format.' });
     }
-    console.error('[pcs] GET /:id error:', err);
+    logger.error('[pcs] GET /:id error:', err);
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
@@ -43,7 +45,7 @@ router.get('/:id', authMiddleware, async (req, res) => {
 /*  POST / — Create new PC                                            */
 /* ------------------------------------------------------------------ */
 
-router.post('/', authMiddleware, requireAdmin, validatePcBody, async (req, res) => {
+router.post('/', authMiddleware, requireAdmin, sanitizeMiddleware, validatePcBody, async (req, res) => {
   try {
     const pc = new PC({
       nombre: req.body.nombre,
@@ -59,7 +61,7 @@ router.post('/', authMiddleware, requireAdmin, validatePcBody, async (req, res) 
       const messages = Object.values(err.errors).map(e => e.message);
       return res.status(400).json({ success: false, errors: messages });
     }
-    console.error('[pcs] POST / error:', err);
+    logger.error('[pcs] POST / error:', err);
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
@@ -68,7 +70,7 @@ router.post('/', authMiddleware, requireAdmin, validatePcBody, async (req, res) 
 /*  PUT /:id — Update existing PC                                     */
 /* ------------------------------------------------------------------ */
 
-router.put('/:id', authMiddleware, requireAdmin, validatePcBody, async (req, res) => {
+router.put('/:id', authMiddleware, requireAdmin, sanitizeMiddleware, validatePcBody, async (req, res) => {
   try {
     const pc = await PC.findByIdAndUpdate(
       req.params.id,
@@ -92,7 +94,7 @@ router.put('/:id', authMiddleware, requireAdmin, validatePcBody, async (req, res
       const messages = Object.values(err.errors).map(e => e.message);
       return res.status(400).json({ success: false, errors: messages });
     }
-    console.error('[pcs] PUT /:id error:', err);
+    logger.error('[pcs] PUT /:id error:', err);
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
@@ -114,7 +116,7 @@ router.delete('/:id', authMiddleware, requireAdmin, async (req, res) => {
     if (err.name === 'CastError') {
       return res.status(400).json({ success: false, message: 'Invalid PC ID format.' });
     }
-    console.error('[pcs] DELETE /:id error:', err);
+    logger.error('[pcs] DELETE /:id error:', err);
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });

@@ -1,23 +1,23 @@
 # `context`
 
 > Path: `frontend/src/context`
-> Last updated: 2026-07-12
+> Last updated: 2026-07-16 (Task 6 — httpOnly cookie sameSite fix)
 > Type: Leaf folder
 
-React Context layer for global application state that must be shared across the component tree without prop-drilling. Currently holds `AuthContext.jsx`, which provides authentication state management (user identity, session token, loading indicators, and login/logout actions) to any descendant component via a custom `useAuth()` hook.
+React Context layer for global application state that must be shared across the component tree without prop-drilling. Currently holds `AuthContext.jsx`, which provides authentication state management (user identity, loading indicators, and login/logout actions) to any descendant component via a custom `useAuth()` hook. Authentication is entirely cookie-based: the backend issues httpOnly `accessToken` and `refreshToken` cookies; this context manages only the user profile object and session lifecycle by querying `GET /api/auth/me`.
 
 ---
 
 ## 📄 `AuthContext.jsx`
 
-Central authentication context provider that manages user session lifecycle for the entire application. On mount, it reads a JWT token from `localStorage`, verifies it by calling `getMe()`, and loads the user profile — or performs a silent logout if the token is stale. Exposes three public actions (`login`, `register`, `logout`) and derived state (`isAuthenticated`, `isLoading`) through React's context API, consumed via the `useAuth()` custom hook.
+Central authentication context provider that manages user session lifecycle for the entire application. On mount, it verifies the session by calling `getMe()` — if the httpOnly access cookie is valid, the server returns the user profile; if not, the user is considered unauthenticated. No token is stored client-side (JWTs live exclusively in httpOnly cookies managed by the browser). Exposes four public actions (`login`, `register`, `logout`, `forceLogout`) and derived state (`isAuthenticated`, `isLoading`) through React's context API, consumed via the `useAuth()` custom hook.
 
 ### Imports and dependencies
 
 | Module | Imported elements | Type |
 |--------|-------------------|------|
 | `react` | `createContext`, `useContext`, `useState`, `useEffect`, `useRef` | External |
-| `../services/authApi` | `login as apiLogin`, `register as apiRegister`, `getMe` | Internal |
+| `../services/authApi` | `login as apiLogin`, `register as apiRegister`, `getMe`, `logout as apiLogout` | Internal |
 
 ### Classes
 
@@ -30,63 +30,69 @@ The raw context handle that carries authentication state and actions. Created wi
 | Key | Type | Description |
 |-----|------|-------------|
 | `user` | `Object \| null` | Current authenticated user object (from the server). |
-| `token` | `string \| null` | Raw JWT token persisted in `localStorage`. |
 | `isAuthenticated` | `boolean` | Derived: `Boolean(user)` — truthy if a valid user exists. |
 | `isLoading` | `boolean` | True while the initial session verification (`getMe()`) is in flight. |
-| `login` | `Function` | Action that authenticates with credentials, persists token, and sets user state. |
-| `register` | `Function` | Action that creates an account. First registration persists token and logs in; subsequent registrations return `{ ...result, pending: true }` (no state mutation) — caller must handle admin-approval flow. |
-| `logout` | `Function` | Clears localStorage token and resets all auth state to null. |
+| `login` | `Function` | Action that authenticates with credentials and sets user state. Backend handles cookie persistence via httpOnly cookies. |
+| `register` | `Function` | Action that creates an account. First registration auto-logs in (backend sets cookies + returns user); subsequent registrations return `{ ...result, pending: true }` (no state mutation) — caller must handle admin-approval flow. |
+| `logout` | `Function` | Calls the backend to revoke refresh tokens and clear auth cookies, then nullifies local user state. |
+| `forceLogout` | `Function` | Synchronously nullifies user state without calling the server. Triggered by the `auth:session-ended` custom event for immediate client-side session termination. |
 
 ---
 
 #### `AuthProvider` *(React functional component)*
 
-Provider wrapper component that maintains authentication state using five React hooks (`useState` × 3, `useEffect`, `useRef`). Renders `<AuthContext.Provider>` around `{children}` with the current auth value. Must be mounted at or above the root of any tree that needs access to auth state.
+Provider wrapper component that maintains authentication state using two React hooks (`useState` × 2, `useEffect`, `useRef`). Renders `<AuthContext.Provider>` around `{children}` with the current auth value. Must be mounted at or above the root of any tree that needs access to auth state.
 
 **State variables:**
 
 | Variable | Initial Value | Role |
 |----------|---------------|------|
 | `user` | `null` | Authenticated user object from the server. |
-| `token` | `null` | JWT token string, mirrored to and read from `localStorage`. |
 | `isLoading` | `true` | Blocks child rendering until session verification completes. |
 
 **Internal logic — boot sequence:**
 
 - **`loadUser() → void`** *(async internal function)*
-  Session recovery called on mount via `useEffect(() => { void loadUser(); }, [])`. Reads `"token"` from `localStorage`; if absent, sets `isLoading = false` and returns. If present, calls `getMe()` to validate: a failure triggers silent logout (removes token, nulls state). A success updates `user` from `result.data`. Guarded by `hasCheckedAuthRef` (`useRef(false)`) to prevent double-execution in React StrictMode.
+  Session recovery called on mount via `useEffect(() => { void loadUser(); }, [])`. Calls `getMe()` to validate the current cookie-backed session: if `result.error` is truthy, sets `user = null`; otherwise sets `user = result.data`. Guarded by `hasCheckedAuthRef` (`useRef(false)`) to prevent double-execution in React StrictMode. Once `hasCheckedAuthRef.current` is `true`, subsequent calls return immediately.
+
+**Custom event integration:**
+
+- **`auth:session-ended`:** A stable ref (`onSessionEndedRef`) holds a callback that nullifies `user` and sets `isLoading = false`. This listener is registered on mount and removed on unmount. Any part of the application (e.g., an interception layer or polling hook) can trigger an immediate client-side logout by dispatching this custom event on `window`.
 
 **Public methods:**
 
 - **`login(username: string, password: string) → Promise<{ data: any \| null, error: string \| null }> → return_type: same envelope`**
-  Authenticates the user against the backend (`apiLogin`). On success, persists the returned token to `localStorage`, updates user and token state. Returns the original `{ data, error }` envelope from `authApi`.
+  Authenticates the user against the backend (`apiLogin`). On success, sets `user` from `result.data.user` and resolves loading. The JWT cookies are managed entirely by the browser (httpOnly). Returns the original `{ data, error }` envelope from `authApi`.
   - `username`: registered login name.
   - `password`: account password.
-  - **Returns:** `{ data, error }` — either `{ data: { token, user }, error: null }` on success or `{ data: null, error: "message" }` on failure.
+  - **Returns:** `{ data, error }` — either `{ data: { user }, error: null }` on success or `{ data: null, error: "message" }` on failure.
 
 - **`register(username: string, password: string) → Promise<{ data: any \| null, error: string \| null, pending?: boolean }> → return_type: extended envelope`**
   Creates a new user account via `apiRegister`. Behaves differently depending on whether this is the first registration or a subsequent one:
 
-  **(a) First registration (returns a token):** The backend returns `{ token, user }` — the function persists the token to `localStorage`, updates user/token state, and returns the original envelope. Identical flow to `login()`.
+  **(a) First registration (auto-login):** The backend sets httpOnly session cookies and returns `{ user }` — the function updates `user` state from `result.data.user`, and returns the original envelope.
 
-  **(b) Subsequent registration (pending approval):** The backend creates the account but returns **no token** (`result.data?.token` is falsy). In this case, the function does *not* mutate `localStorage` or auth state. Instead, it returns `{ ...result, pending: true }`, signaling to the caller that an admin must approve the account before login is possible.
+  **(b) Subsequent registration (pending approval):** The backend creates a `'pending'` account without issuing session cookies. `result.data?.user` is falsy, so the function does *not* mutate auth state. Instead, it returns `{ ...result, pending: true }`, signaling to the caller that an admin must approve the account before login is possible.
 
   - `username`: desired login name for the new account.
   - `password`: password for authentication.
-  - **Returns (first user):** `{ data: { token, user }, error: null }` — auto-logs in on success.
-  - **Returns (pending):** `{ data: \<created-but-no-token\>, error: null, pending: true }` — caller must display a "pending approval" message.
+  - **Returns (first user):** `{ data: { user }, error: null }` — auto-logs in on success.
+  - **Returns (pending):** `{ data: <created-but-no-user>, error: null, pending: true }` — caller must display a "pending approval" message.
   - **Returns (failure):** `{ data: null, error: "message" }` — same as all other auth methods.
 
-- **`logout() → void`**
-  Synchronously removes `"token"` from `localStorage`, nullifies `user` and `token` state. No async call is made; the session ends client-side immediately.
+- **`logout() → void`** *(async)*
+  Calls `apiLogout()` to revoke all refresh tokens on the server and clear the httpOnly cookies. Then nullifies local `user` state.
+
+- **`forceLogout() → void`**
+  Synchronously sets `user = null` and `isLoading = false` without making any network request. Exposed for use by the `auth:session-ended` event listener to enable immediate client-side session termination from any part of the application.
 
 ---
 
 ### Functions
 
-- **`useAuth() → { user, token, isAuthenticated, isLoading, login, register, logout }`** *(exported custom hook)*
+- **`useAuth() → { user, isAuthenticated, isLoading, login, register, logout, forceLogout }`** *(exported custom hook)*
   Consumer hook that returns the full auth context value via `useContext(AuthContext)`. Throws a descriptive error (`'useAuth must be used within an AuthProvider'`) if called outside the provider tree — guards against accidental unguarded usage.
-  - **Returns:** the context value object containing all five state/action keys documented above.
+  - **Returns:** the context value object containing all state/action keys documented above.
 
 ---
 
@@ -102,10 +108,11 @@ Provider wrapper component that maintains authentication state using five React 
 
 ### Architecture notes
 
+- **Cookie-based authentication:** No client-side token management occurs. The backend issues `accessToken` (15 min) and `refreshToken` (7 day) as httpOnly cookies with environment-aware `sameSite` policy (`'Strict'` in production, `'Lax'` in development). This context sends requests with `credentials: 'include'` (handled by the API client layer), so the browser automatically attaches cookies to every `/api/*` request. Session validity is determined exclusively by calling `GET /api/auth/me`.
 - **StrictMode guard:** A `useRef(false)` flag (`hasCheckedAuthRef`) prevents the boot sequence from running twice when React StrictMode intentionally double-invokes effects in development. The ref acts as a one-shot latch — once `hasCheckedAuthRef.current` is `true`, subsequent calls to `loadUser()` return immediately.
 - **Derived state:** `isAuthenticated` is computed inline during render as `Boolean(user)` (Vercel rule 5.1: simple derived value, no memoization needed). No separate hook or variable stores it.
-- **Token persistence:** The JWT token lives in `localStorage` under the key `"token"`. On login and *first* registration, the new token is written here. On logout and stale-token detection, it is removed. On mount, it is read — if present, a verification call fires; if absent, the app bootstraps in an unauthenticated state.
-- **Dual-behavior `register()`:** The registration flow distinguishes between the very first user (admin auto-creates, backend returns a token → immediate login) and subsequent users (backend creates a pending account with no token). This is detected by checking `result.data?.token` on line 68. When falsy, `register()` skips all state mutation and augments the return envelope with `{ pending: true }` for the UI layer to consume.
+- **Custom event-driven session termination:** The provider listens for a custom `auth:session-ended` event on `window`. When dispatched from anywhere in the application, it triggers an immediate synchronous logout via a ref-backed handler — no round-trip to the server is needed. This enables hooks, interceptors, or background pollers to forcibly invalidate the session without prop-drilling a `forceLogout` reference.
+- **Dual-behavior `register()`:** The registration flow distinguishes between the very first user (admin auto-creates, backend sets cookies + returns `{ user }` → immediate login) and subsequent users (backend creates a `'pending'` account with no session). This is detected by checking `result.data?.user` on line 70. When falsy, `register()` skips all state mutation and augments the return envelope with `{ pending: true }` for the UI layer to consume.
 
 ---
 
@@ -116,3 +123,17 @@ Provider wrapper component that maintains authentication state using five React 
 - **Updated** the return type signature of `register()` to include the optional `pending: boolean` flag in the envelope.
 - **Updated** the "Provided value shape" table entry for `register` to describe the two branches (first vs. subsequent registration).
 - **Updated** Architecture notes: clarified that token persistence applies only to login and *first* registration; added a new note on dual-behavior `register()`.
+
+## 🔄 Changes in this update
+
+### AuthContext.jsx — Full cookie-based rewrite (Task 6, 2026-07-16)
+- **Removed** all references to `localStorage` token management. The JWT now lives exclusively in httpOnly cookies on the backend; no client-side token is read, written, or persisted.
+- **Removed** the dead `token: null` state variable (was a leftover artifact from pre-cookie localStorage architecture). State is reduced to two variables: `user` and `isLoading`.
+- **Replaced** the old Provider value shape: `token` key removed, `forceLogout` added. The hook now returns `{ user, isAuthenticated, isLoading, login, register, logout, forceLogout }`.
+- **Rewrote** the boot sequence (`loadUser`) documentation: it no longer reads from `localStorage`; calls `getMe()` unconditionally (cookie is sent automatically by the browser with `credentials: 'include'`).
+- **Updated** `login()` documentation to reflect that cookie persistence is handled by the backend — this context only updates local `user` state.
+- **Updated** `register()` dual-behavior branches: first registration checks `result.data?.user` (not `result.data?.token`) to detect auto-login.
+- **Changed** `logout()` from synchronous localStorage removal to async server call (`apiLogout`) that revokes refresh tokens and clears cookies, then nullifies local state.
+- **Added** `forceLogout()` documentation: synchronous client-only session termination via the custom `auth:session-ended` event.
+- **Rewrote** Architecture notes: removed "Token persistence" section entirely; added "Cookie-based authentication", "Custom event-driven session termination"; updated remaining notes to reflect current code.
+- **Updated** imports table: added `logout as apiLogout` from `../services/authApi`.
