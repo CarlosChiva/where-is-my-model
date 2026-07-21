@@ -1,0 +1,49 @@
+- generic [ref=e23]:
+  - banner [ref=e24]:
+    - generic [ref=e25]:
+      - heading "Where Is My Model" [level=1] [ref=e26]
+      - generic [ref=e27]: 1 servers, 0 services
+      - navigation "Page navigation" [ref=e28]:
+        - tab "Dashboard" [selected] [ref=e29] [cursor=pointer]
+        - tab "Model Calculator" [ref=e30] [cursor=pointer]
+        - tab "Admin" [ref=e31] [cursor=pointer]
+  - generic [ref=e33]:
+    - generic [ref=e34]:
+      - heading "mio" [level=2] [ref=e35]
+      - generic [ref=e36]: 192.168.1.101
+    - paragraph [ref=e38]: 0 services running
+    - generic [ref=e42]:
+      - generic [ref=e43]:
+        - generic [ref=e44]: primero
+        - generic [ref=e45]: 0.0 / 24 GB (0%)
+      - generic [ref=e46]:
+        - progressbar
+    - generic [ref=e47]:
+      - button "Edit server mio" [ref=e48] [cursor=pointer]: ✏ Edit PC
+      - button "Add service to mio" [ref=e49] [cursor=pointer]: ＋ Add Service
+      - button "Delete server mio" [ref=e50] [cursor=pointer]: ✕ Delete PC
+      - button "Check services on mio" [ref=e51] [cursor=pointer]
+  - dialog "Add new server" [ref=e68]:
+    - heading "Add New Server" [level=2] [ref=e69]
+    - generic [ref=e70]:
+      - generic [ref=e71]: Name
+      - textbox "Name" [ref=e72]:
+        - /placeholder: e.g. render-node-01
+    - generic [ref=e73]:
+      - generic [ref=e74]: IP Address
+      - textbox "IP Address" [ref=e75]:
+        - /placeholder: e.g. 192.168.1.100
+    - generic [ref=e76]:
+      - generic [ref=e77]:
+        - generic [ref=e78]: GPUs
+        - button "Add another GPU" [ref=e79] [cursor=pointer]: Add GPU
+      - generic [ref=e82]:
+        - textbox "GPU 1" [ref=e83]
+        - generic [ref=e84]:
+          - spinbutton "GB" [ref=e85]
+          - button "Remove GPU 1 from list" [disabled] [ref=e86]
+    - generic [ref=e90]:
+      - button "Cancel" [ref=e91] [cursor=pointer]
+      - button "Add Server" [ref=e92] [cursor=pointer]
+  - button "Refresh service health" [ref=e58] [cursor=pointer]
+  - button "Add PC" [active] [ref=e65] [cursor=pointer]

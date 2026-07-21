@@ -14,9 +14,9 @@ const router = express.Router();
 /* ------------------------------------------------------------------ */
 
 function getPcId(req) {
-  // req.baseUrl at mount point: /api/pcs/<id>/services
-  const parts = req.baseUrl.match(/\/api\/pcs\/([^/]+)/);
-  return parts ? parts[1] : req.params.pcid;
+  // req.baseUrl at mount point: /api/v1/pcs/<id>/services
+  const parts = req.baseUrl.match(/\/api\/v\d+\/pcs\/([^/]+)/);
+  return parts ? parts[1] : null;
 }
 
 /* ------------------------------------------------------------------ */

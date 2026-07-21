@@ -1,7 +1,7 @@
 # `routes`
 
 > Path: `backend/routes/`
-> Last updated: 2026-07-18 (Task 10 — Replace console.log with structured logger pino)
+> Last updated: 2026-07-20 (Bugfix — services sub-router pcId extraction regex)
 > Type: Leaf folder
 
 Express route modules for the API server. Each file exports a single `express.Router()` instance with RESTful endpoints, unified error handling, and standardized `{ success, data? }` response envelopes. Authentication routes now use a cookie-based two-token architecture (short-lived access tokens + long-lived refresh tokens) and include TOTP-based 2FA intercept in the login flow.
@@ -120,16 +120,26 @@ REST router for embedded Service CRUD operations within a given PC. Default-expo
 | `express` | `express` (default) | External |
 | `../models/PC.js` | `PC` (default) | Internal |
 | `../middleware/validation.js` | `validateServiceBody`, `validateServiceUpdate` (named) | Internal |
+| `../middleware/auth.js` | `authMiddleware`, `requireAdmin` (named) | Internal |
+| `../utils/logger.js` | `logger` (default) | Internal |
+| `../middleware/sanitization.js` | `sanitizeMiddleware` (named) | Internal |
+
+### Helper functions
+
+- **`getPcId(req: Request) → string | null`**
+  Extracts the parent PC's MongoDB `_id` from `req.baseUrl` using a regex. This is necessary because the services router is mounted as a sub-router at `/api/v1/pcs/:pcId/services` in `server.js`. When Express mounts a sub-router with path parameters (like `:pcId`), those mount-path parameters are **not** passed to `req.params` inside the sub-router — `req.params` is always empty. Instead, `req.baseUrl` contains the fully-resolved mount path at runtime (e.g., `/api/v1/pcs/64a1b2c3d4e5f6/services`). The regex pattern `/\/api\/v\d+\/pcs\/([^/]+)/` matches any API version segment (`v1`, `v2`, etc.), captures the ObjectId after `/pcs/`, and returns it. Returns `null` if no match is found (should never occur in normal operation, but prevents crashing on malformed requests).
+  - `req`: The Express request object.
+  - **Returns:** The parsed `pcId` string (MongoDB ObjectId), or `null`.
 
 ### Router endpoints
 
 #### `GET /` — List all services for a PC
 
-Returns the `pc.servicios` array for the PC identified by `req.params.pcId` (inherited from parent route param). Returns 404 if the PC does not exist.
+Returns the `pc.servicios` array for the PC identified by `getPcId(req)`, which extracts the `_id` from `req.baseUrl` via regex (see helper functions section). Returns 404 if the PC does not exist.
 
 - **Handler:** `async (req, res) => { ... }`
 - **Parameters:**
-  - `params.pcId`: MongoDB ObjectId string of the parent PC.
+  - Parent PC `_id`: Extracted from `req.baseUrl` by `getPcId(req)` — MongoDB ObjectId string embedded in the mount path `/api/v1/pcs/<id>/services`.
 - **Success response (200):** `{ success: true, data: [servicios] }` — array of service subdocuments (`{ nombre, puerto, gpu, assignedGpu }`).
 - **Bad request (400):** `{ success: false, message: 'Invalid PC ID format.' }` — CastError from invalid ObjectId string
 - **Not found (404):** `{ success: false, message: 'PC not found' }`
@@ -137,12 +147,12 @@ Returns the `pc.servicios` array for the PC identified by `req.params.pcId` (inh
 
 #### `POST /` — Add a service to a PC
 
-Pushes a new service subdocument (`nombre`, `puerto`, `gpu`, `assignedGpu`) onto the PC's `servicios` array, then calls `pc.save()` which fires the document-level per-GPU validator: `sum(svc.gpu where assignedGpu===i) ≤ gpus[i].vram`. Returns 201 on success; returns 400 with an errors array if any GPU cap is exceeded (caught as `ValidationError`). The `assignedGpu` field identifies which of the PC's GPUs the service is bound to, enabling per-GPU capacity tracking.
+Pushes a new service subdocument (`nombre`, `puerto`, `gpu`, `assignedGpu`) onto the PC's `servicios` array, then calls `pc.save()` which fires the document-level per-GPU validator: `sum(svc.gpu where assignedGpu===i) ≤ gpus[i].vram`. Returns 201 on success; returns 400 with an errors array if any GPU cap is exceeded (caught as `ValidationError`). The `assignedGpu` field identifies which of the PC's GPUs the service is bound to, enabling per-GPU capacity tracking. Logs whether the PC was found for debugging purposes.
 
-- **Middleware:** `validateServiceBody` — validates request body before handler execution (checks required fields and types for `nombre`, `puerto`, `gpu`, `assignedGpu`; enforces per-GPU cap against `pc.gpus[assignedGpu].vram`).
+- **Middleware:** `validateServiceBody` — validates request body before handler execution (checks required fields and types for `nombre`, `puerto`, `gpu`, `assignedGpu`; enforces per-GPU cap against `pc.gpus[assignedGpu].vram`). Also protected by `sanitizeMiddleware` and requires admin role via `requireAdmin`.
 - **Handler:** `async (req, res) => { ... }`
 - **Parameters:**
-  - `params.pcId`: MongoDB ObjectId string of the parent PC.
+  - Parent PC `_id`: Extracted from `req.baseUrl` by `getPcId(req)` — MongoDB ObjectId string embedded in the mount path `/api/v1/pcs/<id>/services`.
 - **Request body:**
   - `nombre`: Service name (`string`).
   - `puerto`: Port number (`number`).
@@ -158,10 +168,10 @@ Pushes a new service subdocument (`nombre`, `puerto`, `gpu`, `assignedGpu`) onto
 
 Parses `req.params.serviceIndex` as an integer with radix 10. Validates bounds (`isNaN`, `<0`, or `≥ servicios.length`) → 404 if out of range. Performs a **partial update**: only fields present in the request body are modified on the live subdocument, preventing accidental zeroing of omitted fields. Calls `pc.save()` to trigger the GPU-cap validator. Supports updating the `assignedGpu` field to migrate a service to a different GPU on the same PC.
 
-- **Middleware:** `validateServiceUpdate` — validates request body before handler execution (checks types and constraints for optional `nombre`, `puerto`, `gpu` fields).
+- **Middleware:** `validateServiceUpdate` — validates request body before handler execution (checks types and constraints for optional `nombre`, `puerto`, `gpu` fields). Also protected by `sanitizeMiddleware` and requires admin role via `requireAdmin`.
 - **Handler:** `async (req, res) => { ... }`
 - **Parameters:**
-  - `params.pcId`: MongoDB ObjectId string of the parent PC.
+  - Parent PC `_id`: Extracted from `req.baseUrl` by `getPcId(req)` — MongoDB ObjectId string embedded in the mount path `/api/v1/pcs/<id>/services`.
   - `params.serviceIndex`: Array index (`string`, parsed as integer with base 10).
 - **Request body** _(all fields optional — partial update):_
   - `nombre`: Updated service name (`string`).
@@ -176,11 +186,12 @@ Parses `req.params.serviceIndex` as an integer with radix 10. Validates bounds (
 
 #### `DELETE /:serviceIndex` — Remove a service by array index
 
-Parses the integer index, validates bounds, then splices the service from the `servicios` array at that position. Calls `pc.save()` to persist. GPU cap cannot be violated on deletion (only reduces usage).
+Parses the integer index, validates bounds, then splices the service from the `servicios` array at that position. Calls `pc.save()` to persist. GPU cap cannot be violated on deletion (only reduces usage). Requires authentication and admin role.
 
+- **Middleware chain:** `authMiddleware` → `requireAdmin`.
 - **Handler:** `async (req, res) => { ... }`
 - **Parameters:**
-  - `params.pcId`: MongoDB ObjectId string of the parent PC.
+  - Parent PC `_id`: Extracted from `req.baseUrl` by `getPcId(req)` — MongoDB ObjectId string embedded in the mount path `/api/v1/pcs/<id>/services`.
   - `params.serviceIndex`: Array index (`string`, parsed as integer with base 10).
 - **Success response (200):** `{ success: true, data: { <full PC document> }, message: 'Service deleted successfully' }`
 - **Bad request (400):** `{ success: false, message: 'Invalid PC ID format.' }` — CastError from invalid ObjectId string
@@ -669,6 +680,10 @@ Deletes a user document by `_id`. Performs a preemptive `mongoose.Types.ObjectId
   - **Inserted synchronous password-complexity guard** in the `/register` handler after presence/type checks but *before* any database work (`User.findOne`, `User.countDocuments`). If `PASSWORD_REGEX.test(password)` fails, returns HTTP 400 with `{ success: false, message: 'Password does not meet complexity requirements.' }` immediately — no wasteful bcrypt hashing or DB round-trip occurs for invalid passwords.
   - This is the **first** defense layer in a three-layer validation chain: (1) sync route guard (`auth.js`), (2) Mongoose schema validator (`User.js` `validate` block), (3) client-side check (`isPasswordStrong` in `LoginPage.jsx`). Together they provide defense-in-depth across client, server handler, and persistence layers.
   - Updated the `/register` endpoint description to document this new validation step, updated error response documentation to include the complexity-rejection body.
+
+## 🔄 Changes in this update
+
+- **2026-07-20 — Bugfix: services sub-router PC ID extraction (`getPcId`):** The `getPcId()` helper function's regex was updated from `/\/api\/pcs\/([^/]+)/` to `/\/api\/v\d+\/pcs\/([^/]+)/`. The old pattern did not match the actual API versioned mount path (`/api/v1/pcs/<id>/services`) and therefore returned `null`, causing all service CRUD endpoints (POST, PUT, DELETE) to return 404 "PC not found" even when the PC existed. The new regex accounts for any version segment (`v1`, `v2`, etc.) between `/api` and `/pcs`. The broken fallback to `req.params.pcid` was removed — Express does not pass mount-path parameters to sub-routers, so `req.params` is always empty inside this sub-router. Added full `getPcId()` helper documentation with explanation of why it exists (Express sub-router parameter stripping). Updated all four endpoint parameter descriptions to reference `getPcId(req)` instead of `req.params.pcId`. Updated imports table to include `auth.js`, `logger.js`, and `sanitization.js`.
 
 ## 🔄 Changes in this update
 

@@ -1,0 +1,62 @@
+- generic [ref=f1e3]:
+  - banner [ref=f1e7]:
+    - generic [ref=f1e8]:
+      - heading "Where Is My Model" [level=1] [ref=f1e9]
+      - generic [ref=f1e10]: 2 servers, 2 services
+      - navigation "Page navigation" [ref=f1e11]:
+        - tab "Dashboard" [selected] [ref=f1e12] [cursor=pointer]
+        - tab "Model Calculator" [ref=f1e13] [cursor=pointer]
+        - tab "Admin" [ref=f1e14] [cursor=pointer]
+  - generic [ref=f1e15]:
+    - generic [ref=f1e113]:
+      - generic [ref=f1e114]:
+        - heading "mio" [level=2] [ref=f1e115]
+        - generic [ref=f1e116]: 192.168.1.101
+      - paragraph [ref=f1e118]: 0 services running
+      - generic [ref=f1e122]:
+        - generic [ref=f1e123]:
+          - generic [ref=f1e124]: primero
+          - generic [ref=f1e125]: 0.0 / 24 GB (0%)
+        - generic [ref=f1e126]:
+          - progressbar
+      - generic [ref=f1e127]:
+        - button "Edit server mio" [ref=f1e128] [cursor=pointer]: ✏ Edit PC
+        - button "Add service to mio" [ref=f1e129] [cursor=pointer]: ＋ Add Service
+        - button "Delete server mio" [ref=f1e130] [cursor=pointer]: ✕ Delete PC
+        - button "Check services on mio" [ref=f1e131] [cursor=pointer]
+    - generic [ref=f1e138]:
+      - generic [ref=f1e139]:
+        - heading "test-server-01" [level=2] [ref=f1e140]
+        - generic [ref=f1e141]: 192.168.1.200
+      - paragraph [ref=f1e143]: 2 services running
+      - generic [ref=f1e144]:
+        - generic [ref=f1e145]:
+          - generic [ref=f1e146]:
+            - generic [ref=f1e148]: stable-diffusion
+            - generic [ref=f1e149]: "7860"
+            - generic [ref=f1e150]: "gpu: RTX 4090"
+          - progressbar [ref=f1e153]
+          - generic [ref=f1e154]:
+            - button "Edit service stable-diffusion" [ref=f1e155] [cursor=pointer]
+            - button "Delete service stable-diffusion" [ref=f1e159] [cursor=pointer]
+        - generic [ref=f1e163]:
+          - generic [ref=f1e164]:
+            - generic [ref=f1e166]: comfyui
+            - generic [ref=f1e167]: "8188"
+            - generic [ref=f1e168]: "gpu: RTX 4090"
+          - progressbar [ref=f1e171]
+          - generic [ref=f1e172]:
+            - button "Edit service comfyui" [ref=f1e173] [cursor=pointer]
+            - button "Delete service comfyui" [ref=f1e177] [cursor=pointer]
+      - generic [ref=f1e183]:
+        - generic [ref=f1e184]:
+          - generic [ref=f1e185]: RTX 4090
+          - generic [ref=f1e186]: 20.0 / 24 GB (83%)
+        - progressbar [ref=f1e188]
+      - generic [ref=f1e189]:
+        - button "Edit server test-server-01" [ref=f1e190] [cursor=pointer]: ✏ Edit PC
+        - button "Add service to test-server-01" [ref=f1e191] [cursor=pointer]: ＋ Add Service
+        - button "Delete server test-server-01" [ref=f1e192] [cursor=pointer]: ✕ Delete PC
+        - button "Check services on test-server-01" [ref=f1e193] [cursor=pointer]
+  - button "Refresh service health" [ref=f1e85] [cursor=pointer]
+  - button "Add PC" [ref=f1e92] [cursor=pointer]

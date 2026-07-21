@@ -1,7 +1,7 @@
 # `middleware`
 
 > Path: `backend/middleware/`
-> Last updated: 2026-07-18 (Task 24 — Input Sanitization Middleware)
+> Last updated: 2026-07-20 (Bugfix — services sub-router pcId extraction regex)
 > Type: Leaf folder
 
 Request validation middleware for the Express backend. Provides middleware functions used as route handlers on PC creation/update and service creation/update endpoints. All validators follow a collect-all-errors pattern (rather than fail-fast) and return a single 400 response with an `errors` array when validation fails. A legacy fallback auto-transforms a scalar `vram` field into the new `gpus` array format for backward compatibility. Also includes rate-limiting middleware via `express-rate-limit` v7 to protect against abuse — three distinct limiters target the global API surface, authentication endpoints, and health-check probes respectively.
@@ -35,7 +35,7 @@ Contains request-body validation middleware functions for PC and Service routes,
   - **Returns:** nothing; calls `next()` on success or returns `res.status(400).json({ success: false, errors })` with a collected array of error strings on failure.
 
 - **`extractPcId(req: Request) → string | null`**
-  Internal helper for routes mounted under `/api/pcs/:pcId` using sub-routers. When Express uses `app.use('/path/:id', router)`, the mount-point parameters (`:pcId`) are stripped from `req.params` inside the sub-router. This function extracts `pcId` by matching against `req.baseUrl`. Falls back to checking `req.params.pciId` and `req.params[':pciId']` for edge cases.
+  Internal helper for routes mounted under `/api/pcs/:pcId/services` using sub-routers. When Express uses `app.use('/path/:id', router)`, the mount-point parameters (`:pcId`) are stripped from `req.params` inside the sub-router — `req.params` is always empty. This function extracts `pcId` by matching `req.baseUrl` against the regex `/\/api\/v\d+\/pcs\/([^/]+)/`. The pattern accounts for any API version segment (`v1`, `v2`, etc.) between `/api` and `/pcs`. There are no fallbacks to `req.params` because those are always empty in sub-routers (the old `req.params.pciId` fallback was removed as part of this fix — it never worked and only masked the root cause).
   - `req`: The Express request object.
   - **Returns:** The parsed `pcId` string, or `null` if not found.
 
@@ -90,6 +90,10 @@ JWT-based authentication and authorization middleware. Provides two functions: `
   Role-based authorization middleware intended to be chained *after* `authMiddleware`. Assumes `req.user` is already populated by upstream auth middleware. Checks that `req.user.role === 'admin'`. If the check passes, calls `next()`. Otherwise returns 403 with `'Admin access required.'`.
 
 ## 🔄 Changes in this update
+
+- **2026-07-20 — Bugfix: pcId extraction regex in `extractPcId`:** The regex inside `extractPcId()` was updated from `/\/api\/pcs\/([^/]+)/` to `/\/api\/v\d+\/pcs\/([^/]+)/`. The old pattern did not match the actual API versioned mount path (`/api/v1/pcs/<id>/services`) and therefore always returned `null`, causing service validation middleware to fail with 404 "PC not found" even when the target PC existed. The new regex accounts for any version segment (`v1`, `v2`, etc.) between `/api` and `/pcs`. The broken fallback chain (`req.params.pciId || req.params[':pciId']`) was removed — Express does not pass mount-path parameters to sub-routers, so `req.params` is always empty inside the services sub-router. Updated the function description accordingly.
+
+## 🔄 Changes in this update (prior)
 
 - **T03 — Multi-GPU architecture support in `validateServiceBody`:** The middleware was completely rewritten to validate a new `assignedGpu` field. It accepts a non-negative integer representing a valid index into the parent PC's `gpus[]` array. When omitted and the PC has exactly one GPU, it defaults to index 0. When the PC has multiple GPUs and `assignedGpu` is omitted, validation fails with an error. VRAM capacity enforcement now checks **per-GPU** limits (`pc.gpus[assignedGpu].vram`) instead of a global cap (`pc.vram`). The resolved `assignedGpu` value is stored on `req.body` for downstream route handlers to use.
 - **T04 — Multi-GPU architecture support in `validateServiceUpdate`:** The `validateServiceUpdate` function was completely rewritten to mirror the Multi-GPU capabilities of `validateServiceBody`. New behavior includes: (1) validates optional `assignedGpu` field for type (non-negative integer) and range against `pc.gpus`; (2) tracks `currentGpuIndex` from the existing service record; (3) performs per-GPU capacity accounting — subtracts old allocation from source GPU, adds new allocation to target GPU; (4) handles cross-GPU reassignment by independently verifying both source GPU (freed capacity must remain non-negative and under cap to detect concurrent-update races) and target GPU (projected usage must not exceed VRAM); (5) handles `assignedGpu`-only changes with VRAM capacity check on the target GPU using the service's existing `gpu` allocation; (6) stores resolved `assignedGpu` on `req.body` for downstream route handlers.

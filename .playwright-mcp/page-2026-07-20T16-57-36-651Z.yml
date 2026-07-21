@@ -1,0 +1,65 @@
+- generic [ref=e23]:
+  - banner [ref=e24]:
+    - generic [ref=e25]:
+      - heading "Where Is My Model" [level=1] [ref=e26]
+      - generic [ref=e27]: 2 servers, 0 services
+      - navigation "Page navigation" [ref=e28]:
+        - tab "Dashboard" [selected] [ref=e29] [cursor=pointer]
+        - tab "Model Calculator" [ref=e30] [cursor=pointer]
+        - tab "Admin" [ref=e31] [cursor=pointer]
+  - generic [ref=e32]:
+    - generic [ref=e94]:
+      - generic [ref=e95]:
+        - heading "mio" [level=2] [ref=e96]
+        - generic [ref=e97]: 192.168.1.101
+      - paragraph [ref=e99]: 0 services running
+      - generic [ref=e103]:
+        - generic [ref=e104]:
+          - generic [ref=e105]: primero
+          - generic [ref=e106]: 0.0 / 24 GB (0%)
+        - generic [ref=e107]:
+          - progressbar
+      - generic [ref=e108]:
+        - button "Edit server mio" [ref=e109] [cursor=pointer]: ✏ Edit PC
+        - button "Add service to mio" [ref=e110] [cursor=pointer]: ＋ Add Service
+        - button "Delete server mio" [ref=e111] [cursor=pointer]: ✕ Delete PC
+        - button "Check services on mio" [ref=e112] [cursor=pointer]
+    - generic [ref=e119]:
+      - generic [ref=e120]:
+        - heading "test-server-01" [level=2] [ref=e121]
+        - generic [ref=e122]: 192.168.1.200
+      - paragraph [ref=e124]: 0 services running
+      - generic [ref=e128]:
+        - generic [ref=e129]:
+          - generic [ref=e130]: RTX 4090
+          - generic [ref=e131]: 0.0 / 24 GB (0%)
+        - generic [ref=e132]:
+          - progressbar
+      - generic [ref=e133]:
+        - button "Edit server test-server-01" [ref=e134] [cursor=pointer]: ✏ Edit PC
+        - button "Add service to test-server-01" [ref=e135] [cursor=pointer]: ＋ Add Service
+        - button "Delete server test-server-01" [ref=e136] [cursor=pointer]: ✕ Delete PC
+        - button "Check services on test-server-01" [ref=e137] [cursor=pointer]
+  - dialog "Add new service" [ref=e145]:
+    - heading "Add New Service" [level=2] [ref=e146]
+    - generic [ref=e147]:
+      - generic [ref=e148]: Name
+      - textbox "Name" [ref=e149]:
+        - /placeholder: e.g. stable-diffusion-webui
+        - text: stable-diffusion
+    - generic [ref=e150]:
+      - generic [ref=e151]: Port
+      - spinbutton "Port" [ref=e152]: "7860"
+    - generic [ref=e153]:
+      - generic [ref=e154]: Assign to GPU
+      - combobox "Assign to GPU" [ref=e155]:
+        - option "RTX 4090 — 24 GB free" [selected]
+    - generic [ref=e156]:
+      - generic [ref=e157]: GPU VRAM (GB)
+      - spinbutton "GPU VRAM (GB)" [ref=e158]: "12"
+      - paragraph [ref=e159]: 24 GB remaining on RTX 4090
+    - generic [ref=e160]:
+      - button "Cancel" [ref=e161] [cursor=pointer]
+      - button "Add Service" [ref=e162] [cursor=pointer]
+  - button "Refresh service health" [ref=e58] [cursor=pointer]
+  - button "Add PC" [ref=e65] [cursor=pointer]

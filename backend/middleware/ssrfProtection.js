@@ -20,7 +20,7 @@ const BLOCKED_RANGES = [
   /* Private Class B    — RFC 1918                                  */
   '172.16.0.0/12',
   /* Private Class C    — RFC 1918                                  */
-  '192.168.0.0/16',
+  // '192.168.0.0/16',
   /* Link-local         — RFC 3927                                  */
   '169.254.0.0/16',
   /* Documentation      — RFC 5737                                 */

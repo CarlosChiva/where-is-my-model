@@ -93,8 +93,8 @@ export function validatePcBody(req, res, next) {
 /* ------------------------------------------------------------------ */
 
 function extractPcId(req) {
-  const parts = req.baseUrl.match(/\/api\/pcs\/([^/]+)/);
-  return parts ? parts[1] : req.params.pciId || req.params[':pciId'] || null;
+  const parts = req.baseUrl.match(/\/api\/v\d+\/pcs\/([^/]+)/);
+  return parts ? parts[1] : null;
 }
 
 /* ------------------------------------------------------------------ */
