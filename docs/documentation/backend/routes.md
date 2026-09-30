@@ -1,10 +1,10 @@
 # `routes`
 
 > Path: `backend/routes/`
-> Last updated: 2026-07-11
+> Last updated: 2026-07-18 (Task 10 — Replace console.log with structured logger pino)
 > Type: Leaf folder
 
-Express route modules for the API server. Each file exports a single `express.Router()` instance with RESTful endpoints, unified error handling, and standardized `{ success, data? }` response envelopes.
+Express route modules for the API server. Each file exports a single `express.Router()` instance with RESTful endpoints, unified error handling, and standardized `{ success, data? }` response envelopes. Authentication routes now use a cookie-based two-token architecture (short-lived access tokens + long-lived refresh tokens) and include TOTP-based 2FA intercept in the login flow.
 
 ---
 
@@ -197,7 +197,7 @@ Parses the integer index, validates bounds, then splices the service from the `s
 
 ## 📄 `auth.js`
 
-Express router for JWT-based user authentication. Default-exports an Express `Router` with three endpoints: registration, login, and profile retrieval. Two internal helper functions (`signToken`, `userProfile`) produce the JWT and a safe user-profile object (excludes the hashed password). The `/me` endpoint is protected by the `authMiddleware` from `../middleware/auth.js`. All error responses follow the `{ success: false, message? }` envelope shared across all route modules.
+Express router for JWT-based user authentication. Default-exports an Express `Router` with five endpoints: registration, login, token refresh, profile retrieval, and logout. Multiple internal helper functions produce signed access/refresh JWTs, set httpOnly cookies, construct safe user-profile objects (excludes the hashed password), generate short-lived temporary 2FA session tokens, and parse JWT duration strings. The router now supports a cookie-based two-token architecture: access tokens (`accessToken` cookie, 15 min TTL) and refresh tokens (`refreshToken` cookie, 7 day TTL persisted in MongoDB). A new 2FA interceptor in the login flow detects users with `totpEnabled: true` and issues a short-lived `tempAuthSession` cookie (5 minutes) instead of full session cookies — the client must then verify via `POST /api/auth/2fa/verify`. The `/me` endpoint is protected by the `authMiddleware` from `../middleware/auth.js`. All error responses follow the `{ success: false, message? }` envelope shared across all route modules.
 
 ### Imports and dependencies
 
@@ -206,14 +206,49 @@ Express router for JWT-based user authentication. Default-exports an Express `Ro
 | `express` | `express` (default) | External |
 | `jsonwebtoken` | `jwt` (default) | External |
 | `../models/User.js` | `User` (default) | Internal |
+| `../models/RefreshToken.js` | `RefreshToken` (default) | Internal |
 | `../middleware/auth.js` | `authMiddleware` (named) | Internal |
+| `../middleware/rateLimit.js` | `authLimiter` (named) | Internal |
+
+### Constants
+
+| Constant | Value | Purpose |
+|----------|-------|---------|
+| `PASSWORD_REGEX` | `/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#])[A-Za-z\d@$!%*?&#]{12,}$/` | Regex duplicated from the User model for synchronous, pre-DB password complexity checking in the `/register` handler |
+| `TEMP_SESSION_TTL_MS` | `300_000` (5 minutes) | Maximum lifetime of the `tempAuthSession` cookie issued during 2FA-required login intercept. After this window expires, the user must re-authenticate via `POST /login`. |
 
 ### Helper functions
 
-- **`signToken(user: User) → string`**
-  Creates a signed JWT for an authenticated user. The payload contains three fields: `userId` (stringified `_id`), `username`, and `role`. Signs with `process.env.JWT_SECRET` using `process.env.JWT_EXPIRES_IN` as the expiration claim.
+- **`createTempAuthToken(userId: string) → string`**
+  Creates a short-lived JWT used as the value for the `tempAuthSession` cookie. The payload contains only `userId` and a Unix timestamp (`ts`). Signed with `JWT_SECRET` and expires after 5 minutes. Used exclusively by the login intercept flow when a 2FA-enabled user provides correct credentials but has not yet completed TOTP verification.
+  - `userId`: MongoDB `_id` string of the authenticated-but-not-yet-verified user.
+  - **Returns:** A signed JWT string suitable for storage in an httpOnly cookie.
+
+- **`verifyTempAuthToken(token: string) → object | null`**
+  Verifies and decodes a temp session JWT (the value stored in `tempAuthSession` cookie). In addition to standard `jwt.verify()`, performs an extra age check against the embedded `ts` field — if `Date.now() - decoded.ts > TEMP_SESSION_TTL_MS`, returns `null`. This double-check enforces the 5-minute window even if the JWT's own `exp` claim is slightly generous due to clock drift.
+  - `token`: The raw JWT string from `req.cookies.tempAuthSession`.
+  - **Returns:** Decoded payload object (`{ userId, ts }`) on success, or `null` on any failure (invalid signature, expired, exceeded TTL window).
+
+- **`parseDurationToMs(duration: string) → number | null`**
+  Parses a JWT duration string like `"7d"`, `"30m"`, `"1h"`, or `"60s"` into milliseconds. Matches via regex `^(\d+)([smhd])$` and multiplies the numeric value by unit-specific multipliers. Returns `null` if the format does not match.
+  - `duration`: A duration string with a single-suffix unit character.
+  - **Returns:** millisecond value or `null`.
+
+- **`signAccessToken(user: User) → string`**
+  Creates a short-lived access JWT for an authenticated user. The payload contains three fields: `userId` (stringified `_id`), `username`, and `role`. Signs with `process.env.JWT_SECRET` using `process.env.JWT_EXPIRES_IN` as the expiration claim. Used by both `/register` (first-user admin flow) and `/login` for non-2FA users.
   - `user`: A Mongoose User document instance.
-  - **Returns:** The signed JWT string, ready to be sent in a Bearer token.
+  - **Returns:** The signed JWT string, set as the `accessToken` httpOnly cookie.
+
+- **`signRefreshToken(user: User) → Promise<string>`** *(async)*
+  Creates a long-lived refresh JWT bound to a specific user and persists it in the `RefreshToken` MongoDB collection. Signs with `process.env.JWT_REFRESH_SECRET` using `process.env.JWT_REFRESH_EXPIRES_IN`. The created record includes the raw token string, the associated `userId`, and an absolute `expiresAt` timestamp computed by parsing the expiry duration via `parseDurationToMs()`.
+  - `user`: A Mongoose User document instance.
+  - **Returns:** The signed refresh JWT string (stored in both MongoDB and set as the `refreshToken` httpOnly cookie).
+
+- **`setAuthCookies(res: Response, accessTokenValue: string, refreshTokenValue: string) → void`**
+  Sets two httpOnly cookies on the response:
+  - `accessToken`: short-lived (15 min maxAge), available at path `/api`, secure in production.
+  - `refreshToken`: long-lived (7 day maxAge), scoped to path `/api/auth/refresh` only (limiting exposure), secure in production.
+  Both cookies use environment-aware `sameSite`: `'Strict'` when `NODE_ENV === 'production'`, `'Lax'` otherwise. This ensures strict CSRF protection in deployed environments while allowing cross-origin HMR/proxy workflows in development.
 
 - **`userProfile(user: User) → object`**
   Builds a safe user-profile object that excludes the hashed password (which is marked `select: false` in the schema). Returns `userId`, `username`, and `role`.
@@ -224,54 +259,224 @@ Express router for JWT-based user authentication. Default-exports an Express `Ro
 
 #### `POST /register` — Create a new user account
 
-Accepts `username` and `password` from the request body. Validates both fields are non-empty strings. Checks for duplicate usernames via `User.findOne()`. Uses `User.countDocuments()` to determine the role: the first registered user receives `'admin'`; all subsequent registrations receive `'pending'`. Upon success, persists the new user (which triggers bcryptjs hashing in the pre-save hook). **Response differs by role:** admins receive a JWT token and profile; pending users receive a Spanish-language confirmation message and their role value — no JWT is issued until an admin approves them via `PUT /api/users/:userId/role`.
+Accepts `username` and `password` from the request body. Protected by `authLimiter` rate limiting (5 requests per 15 minutes per IP) to prevent brute-force registration abuse. Validates both fields are non-empty strings. **Then performs a synchronous password-complexity guard** using `PASSWORD_REGEX.test(password)` *before* any async database work — this is the first defense layer; if the regex fails, returns 400 immediately without touching MongoDB. Checks for duplicate usernames via `User.findOne()`. Uses `User.countDocuments()` to determine the role: the first registered user receives `'admin'`; all subsequent registrations receive `'pending'`. Upon success, persists the new user (which triggers the Mongoose schema-level validator as a second defense layer, then bcryptjs hashing in the pre-save hook). **Response differs by role:** admins receive full session cookies (`accessToken` + `refreshToken`) and a profile object; pending users receive a Spanish-language confirmation message and their role value — no session cookies are issued until an admin approves them via `PUT /api/users/:userId/role`.
 
+- **Middleware:** `authLimiter` — rate limits registration attempts to 5 per 15-minute window per IP. Returns 429 if exceeded.
 - **Handler:** `async (req, res) => { ... }`
 - **Request body:**
   - `username`: Account name (`string`, required). Trimmed before persistence.
   - `password`: Plain-text password (`string`, required). Hashed by the User model's pre-save hook.
-- **Success response — admin (first user, 201):** `{ success: true, token: <JWT string>, user: { userId, username, role } }`
-- **Success response — pending (subsequent users, 201):** `{ success: true, message: 'Cuenta registrada exitosamente. Espera aprobación del administrador.', role: 'pending' }` — no token is returned; the user must wait for an admin to change their role before they can log in and receive a JWT.
-- **Validation error (400):** `{ success: false, message: 'Username is required.' }` or `{ success: false, message: 'Password is required.' }` — missing/invalid input. Also `{ success: false, errors: [string, ...] }` from Mongoose `ValidationError`.
+- **Success response — admin (first user, 201):** `{ success: true, user: { userId, username, role } }` with `accessToken` and `refreshToken` cookies set. The refresh token is persisted in MongoDB for rotation tracking.
+- **Success response — pending (subsequent users, 201):** `{ success: true, message: 'Cuenta registrada exitosamente. Espera aprobación del administrador.', role: 'pending' }` — no cookies are set; the user must wait for an admin to change their role before they can log in and receive session tokens.
+- **Validation error (400):** `{ success: false, message: 'Username is required.' }` or `{ success: false, message: 'Password is required.' }` — missing/invalid input. `{ success: false, message: 'Password does not meet complexity requirements.' }` — password fails the synchronous `PASSWORD_REGEX` guard (first defense layer) or Mongoose schema validator (second defense layer). Also `{ success: false, errors: [string, ...] }` from Mongoose `ValidationError`.
 - **Conflict (409):** `{ success: false, message: 'Username already exists.' }` — username collision.
+- **Too Many Requests (429):** `{ success: false, message: 'Too many requests, please try again later.' }` — returned by `authLimiter` when exceeding 5 requests per 15-minute window per IP.
 - **Error response (500):** `{ success: false, message: 'Internal server error' }`
 
-#### `POST /login` — Authenticate and receive a JWT
+#### `POST /login` — Authenticate and receive session cookies (with 2FA intercept)
 
-Looks up a user by trimmed username with `.select('+password')` to include the normally-excluded password field. If the user exists, calls the instance method `user.comparePassword(password)` to verify the bcrypt hash. On mismatch or missing user, returns 401. **After password verification, before JWT signing**, an additional guard checks if `user.role === 'pending'`: pending users are rejected with HTTP 403 and a Spanish-language message even though their credentials were correct — they must wait for an admin to approve them via `PUT /api/users/:userId/role`. On success (non-pending, correct credentials), signs a JWT and returns token + profile.
+Protected by `authLimiter` rate limiting (5 requests per 15 minutes per IP) to prevent brute-force credential attacks. Looks up a user by trimmed username with `.select('+password +totpEnabled')` to include both the normally-excluded password field and the 2FA status flag. If the user exists, calls the instance method `user.comparePassword(password)` to verify the bcrypt hash. On mismatch or missing user, returns 401. Three post-authentication gates execute in sequence:
 
+1. **Pending-user guard:** If `user.role === 'pending'`, rejects with HTTP 403 and a Spanish-language message — credentials were correct but admin approval is required.
+2. **2FA intercept:** If `user.totpEnabled` is `true`, issues a short-lived `tempAuthSession` cookie (5-minute TTL, httpOnly, secure in production, `sameSite: 'Strict'` in production / `'Lax'` in development, scoped to `/api/auth/2fa/verify`) containing a temporary JWT with the user's ID. Returns HTTP 403 with `{ status: '2FA_REQUIRED' }` — **no access or refresh cookies are issued**. The client must call `POST /api/auth/2fa/verify` with a TOTP code to complete authentication.
+3. **Normal login flow (non-2FA, non-pending):** Revokes all existing unrevoked refresh tokens for this user via `RefreshToken.updateMany()`, signs new access + refresh tokens, sets both cookies, and returns 200 with the user profile.
+
+- **Middleware:** `authLimiter` — rate limits login attempts to 5 per 15-minute window per IP. Returns 429 if exceeded.
 - **Handler:** `async (req, res) => { ... }`
 - **Request body:**
   - `username`: Account name (`string`, required).
   - `password`: Plain-text password to compare against the stored hash (`string`, required).
-- **Success response (200):** `{ success: true, token: <JWT string>, user: { userId, username, role } }`
+- **Success response — no 2FA (200):** `{ success: true, user: { userId, username, role } }` with `accessToken` and `refreshToken` cookies set.
+- **Success response — 2FA enabled (403 with redirect status):** `{ success: false, status: '2FA_REQUIRED', message: 'Two-factor authentication required.', userId: <string> }` with `tempAuthSession` cookie set. The client must proceed to `POST /api/auth/2fa/verify`.
 - **Validation error (400):** `{ success: false, message: 'Username is required.' }` or `{ success: false, message: 'Password is required.' }` — missing/invalid input.
 - **Unauthorized (401):** `{ success: false, message: 'Invalid credentials.' }` — wrong username or password.
-- **Forbidden (403):** `{ success: false, message: 'Tu cuenta está pendiente de aprobación por un administrador.' }` — credentials are correct but the user's role is `'pending'`; no JWT is issued until an admin changes their role via `PUT /api/users/:userId/role`.
+- **Forbidden (403):** `{ success: false, message: 'Tu cuenta está pendiente de aprobación por un administrador.' }` — credentials are correct but the user's role is `'pending'`; no session tokens issued until an admin changes their role via `PUT /api/users/:userId/role`.
+- **Too Many Requests (429):** `{ success: false, message: 'Too many requests, please try again later.' }` — returned by `authLimiter` when exceeding 5 requests per 15-minute window per IP.
+- **Error response (500):** `{ success: false, message: 'Internal server error' }`
+
+#### `POST /refresh` — Rotate access and refresh tokens
+
+Reads the `refreshToken` cookie from the request, verifies its signature against `JWT_REFRESH_SECRET`, then looks up the raw token in MongoDB via `RefreshToken.findByToken()`. If found and valid (not revoked, not expired), it revokes that specific token record, generates fresh access + refresh tokens, sets new cookies, and returns 200. Handles three failure modes: expired JWT (`TokenExpiredError` → clear both cookies + 401), invalid signature/general JWT error (403), and revoked/not-found DB record (revokes all remaining valid tokens for that user, clears cookies, returns 401). Protected by `authLimiter`.
+
+- **Middleware:** `authLimiter` — rate limits refresh attempts to 5 per 15-minute window per IP.
+- **Handler:** `async (req, res) => { ... }`
+- **No request body required.** Reads tokens exclusively from cookies.
+- **Success response (200):** `{ success: true, message: 'Tokens rotated.' }` with new `accessToken` and `refreshToken` cookies set.
+- **Unauthorized (401):** Various failure modes — expired JWT, revoked token, not-found token, or deleted user account. All clear both auth cookies.
+- **Forbidden (403):** `{ success: false, message: 'Invalid refresh token.' }` — signature mismatch on the presented refresh JWT.
+- **Too Many Requests (429):** Returned by `authLimiter`.
 - **Error response (500):** `{ success: false, message: 'Internal server error' }`
 
 #### `GET /me` — Return the authenticated user's profile
 
-Protected endpoint that requires a valid Bearer token. The `authMiddleware` middleware verifies and decodes the JWT before this handler executes, populating `req.user`. The handler simply returns the decoded payload as the user profile — no additional database query is performed because all needed fields (`userId`, `username`, `role`) are already present in the token payload.
+Protected endpoint that requires a valid access token cookie. The `authMiddleware` middleware verifies and decodes the JWT before this handler executes, populating `req.user`. The handler looks up the user document from MongoDB by `userId` (404 if not found) and returns the safe profile projection via `userProfile()`. Unlike the legacy in-memory-only version, this now performs a database lookup.
 
 - **Middleware:** `authMiddleware` — verifies Bearer JWT; returns 401 on any authentication failure.
-- **Handler:** `(req, res) => { ... }` (synchronous — no database call).
+- **Handler:** `async (req, res) => { ... }` (async — performs a DB query).
 - **Request headers:**
   - `Authorization: Bearer <JWT>` (required).
-- **Success response (200):** `{ success: true, user: { userId, username, role } }`
+- **Success response (200):** `{ userId, username, role }` — safe user profile without password.
+- **Not found (404):** `{ success: false, message: 'User not found.' }` — the account was deleted after token issuance.
 - **Unauthorized (401):** Various messages depending on the auth failure type (handled by upstream `authMiddleware`).
+
+#### `POST /logout` — Revoke all refresh tokens and clear session cookies
+
+Protected endpoint that revokes all unrevoked refresh tokens for the authenticated user via `RefreshToken.updateMany()`, then clears both `accessToken` and `refreshToken` cookies. The database write is wrapped in a best-effort try/catch — logout succeeds even if the MongoDB write fails (cookies are always cleared).
+
+- **Middleware:** `authMiddleware` — verifies Bearer JWT; returns 401 on any authentication failure.
+- **Handler:** `async (req, res) => { ... }`
+- **Success response (200):** `{ success: true, message: 'Logged out' }` with both auth cookies cleared.
+- **Unauthorized (401):** Various messages depending on the auth failure type.
 
 ### Exports
 
 | Export | Type | Description |
 |--------|------|-------------|
-| `default` | `express.Router()` | Router instance with 3 authentication endpoints mounted at `/api/auth` via `server.js` |
+| `default` | `express.Router()` | Router instance with 5 authentication endpoints mounted at `/api/auth` via `server.js` |
+
+---
+
+## 📄 `twoFactor.js`
+
+Express router for TOTP-based two-factor authentication (2FA). Default-exports an Express `Router` with four endpoints covering the complete 2FA lifecycle: setup, verification, status check, and disabling. Uses `speakeasy` for time-based OTP generation/verification and `qrcode` for QR code data URI generation. Implements a dual-mode verification endpoint that works both during post-login intercept (via `tempAuthSession` cookie from `auth.js`) and as a mid-session 2FA enablement flow (via standard `accessToken` cookie). On successful verification, the endpoint issues full session cookies (`accessToken` + `refreshToken`), revokes all existing refresh tokens for that user, and clears the temporary session. All endpoints are rate-limited via `authLimiter`. Mounted at `/api/auth/2fa` **before** the general auth router to prevent Express parameter collision.
+
+### Imports and dependencies
+
+| Module | Imported elements | Type |
+|--------|-------------------|------|
+| `express` | `express` (default) | External |
+| `jsonwebtoken` | `jwt` (default) | External |
+| `qrcode` | `QRCode` (default) | External |
+| `speakeasy` | `speakeasy` (default) | External |
+| `../models/User.js` | `User` (default) | Internal |
+| `../models/RefreshToken.js` | `RefreshToken` (default) | Internal |
+| `../middleware/auth.js` | `authMiddleware` (named) | Internal |
+| `../middleware/rateLimit.js` | `authLimiter` (named) | Internal |
+| `../utils/logger.js` | `logger` (default) | Internal |
+
+### Constants
+
+| Constant | Value | Purpose |
+|----------|-------|---------|
+| `TEMP_SESSION_TTL_MS` | `300_000` (5 minutes) | Maximum lifetime of a temporary 2FA session. Used in the dual-mode `/verify` endpoint to detect expired post-login sessions. |
+| `APP_NAME` | `'WhereIsMyModel'` | Application identifier embedded in the TOTP otpauth URI label (`'WhereIsMyModel:{username}'`). |
+
+### Error logging
+
+All four endpoints (`/setup`, `/verify`, `/disable`, `/status`) log catch-block errors via `logger.error('[2fa] <METHOD> <PATH> error:', err)` using the pino structured logger imported from `../utils/logger.js`.
+
+### Helper functions
+
+- **`parseDurationToMs(duration: string) → number | null`**
+  Parses a JWT duration string (e.g., `"7d"`, `"30m"`) into milliseconds. Same implementation as in `auth.js` — shared logic for interpreting `JWT_REFRESH_EXPIRES_IN`.
+  - `duration`: A duration string with numeric value and single-suffix unit (`s`, `m`, `h`, or `d`).
+  - **Returns:** millisecond value or `null` on format mismatch.
+
+- **`verifyTempAuthToken(token: string) → object | null`**
+  Verifies and decodes a temporary session JWT (the value of the `tempAuthSession` cookie). Validates the signature against `JWT_SECRET`, then enforces the 5-minute TTL window via the embedded `ts` timestamp. Same dual-check strategy as `auth.js`.
+  - `token`: The raw JWT string from `req.cookies.tempAuthSession`.
+  - **Returns:** Decoded payload (`{ userId, ts }`) or `null`.
+
+- **`signAccessToken(user: User) → string`**
+  Creates a short-lived access JWT containing `userId`, `username`, and `role`. Same implementation as in `auth.js`. Used by the `/verify` endpoint to issue a full session upon successful TOTP confirmation.
+  - `user`: A Mongoose User document instance.
+  - **Returns:** The signed access JWT string.
+
+- **`signRefreshToken(user: User) → Promise<string>`** *(async)*
+  Creates and persists a refresh token in MongoDB via the `RefreshToken` model. Signs with `JWT_REFRESH_SECRET`, computes absolute expiration, and stores the raw token for later rotation lookups. Same implementation as in `auth.js`.
+  - `user`: A Mongoose User document instance.
+  - **Returns:** The signed refresh JWT string.
+
+- **`setAuthCookies(res: Response, accessTokenValue: string, refreshTokenValue: string) → void`**
+  Sets the `accessToken` (15 min, path `/api`) and `refreshToken` (7 day, path `/api/auth/refresh`) httpOnly cookies. Uses environment-aware `sameSite`: `'Strict'` in production, `'Lax'` in development. Mirrors the implementation in `auth.js`.
+
+- **`userProfile(user: User) → object`**
+  Builds a safe user-profile object `{ userId, username, role }`. Mirrors the implementation in `auth.js`.
+
+### Router endpoints
+
+#### `POST /setup` — Generate a TOTP secret and QR code
+
+Authenticated endpoint (requires valid access token via `authMiddleware`). Generates a fresh TOTP secret using `speakeasy.generateSecret()` with the user's username as the label. Stores the base32-encoded secret on the user document (without enabling 2FA yet). Generates a QR code data URI from the otpauth URL for scanning by authenticator apps. Also returns the raw base32 secret for manual entry. Rate-limited via `authLimiter`.
+
+- **Middleware chain:** `authLimiter` → `authMiddleware`.
+- **Handler:** `async (req, res) => { ... }`
+- **No request body required.** The user identity is determined from the authenticated JWT payload.
+- **Success response (200):**
+  ```json
+  {
+    "success": true,
+    "message": "TOTP secret generated successfully.",
+    "qrCode": "<data URI of QR code>",
+    "manualEntry": "<base32 secret string>"
+  }
+  ```
+- **Not found (404):** `{ success: false, message: 'User not found.' }` — user ID from JWT does not match any document.
+- **Error response (500):** `{ success: false, message: 'Internal server error' }`
+
+#### `POST /verify` — Verify a TOTP code and complete 2FA enrollment
+
+Dual-mode endpoint that does **not** require standard authentication middleware. Instead, it checks for identity via two cookie-based modes:
+- **Mode A (post-login flow):** Reads the `tempAuthSession` cookie set by `POST /login` when intercepting a 2FA-enabled user. Verifies the temp token via `verifyTempAuthToken()` to extract the `userId`.
+- **Mode B (mid-session enablement):** If Mode A yields no valid session, attempts to decode the standard `accessToken` cookie via `jwt.verify()`.
+
+Once a `userId` is established, loads the user with both `totpSecret` and `password` fields selected. Verifies the submitted TOTP code against the stored secret using `speakeasy.totp.verify()` with a timing-safe comparator and `window: 1` (allows one time-step drift). If verification passes and 2FA is not yet enabled (`totpEnabled: false`), sets it to `true`. Revokes all existing unrevoked refresh tokens for this user, signs fresh access + refresh cookies via the shared helpers, and clears the temporary session cookie. Rate-limited via `authLimiter`.
+
+- **Middleware:** `authLimiter` (only — no `authMiddleware`).
+- **Handler:** `async (req, res) => { ... }`
+- **Request body:**
+  - `code`: The 6-digit TOTP code from the user's authenticator app (`string`, required).
+- **Success response (200):** `{ success: true, message: 'Two-factor authentication verified.', user: { userId, username, role } }` with full `accessToken` and `refreshToken` cookies set. Temp session cookie cleared.
+- **Validation error (400):** `{ success: false, message: 'TOTP code is required.' }` — missing or empty `code`. Also `{ success: false, message: '2FA is not set up for this account.' }` — user has no stored `totpSecret`.
+- **Unauthorized (401):** `{ success: false, message: 'No valid 2FA session. Please log in again.' }` — neither temp session nor access token could be verified. Also `{ success: false, message: 'Invalid TOTP code.' }` — timing-safe verification failed.
+- **Error response (500):** `{ success: false, message: 'Internal server error' }`
+
+#### `POST /disable` — Disable 2FA and clear all TOTP state
+
+Authenticated endpoint (requires valid access token via `authMiddleware`). Requires the user to provide both their current password and a valid TOTP code in the request body. This dual-confirmation ensures that an attacker with a stolen session cookie cannot silently disable 2FA. Verifies the password first via `user.comparePassword()`, then verifies the TOTP code via `speakeasy.totp.verify()` (timing-safe, `window: 1`). On success, clears both `totpSecret` (set to `undefined`) and `totpEnabled` (set to `false`). Rate-limited via `authLimiter`.
+
+- **Middleware chain:** `authLimiter` → `authMiddleware`.
+- **Handler:** `async (req, res) => { ... }`
+- **Request body:**
+  - `password`: The user's current plain-text password (`string`, required). Computed against the stored bcrypt hash.
+  - `code`: Current TOTP code from the authenticator app (`string`, required). Verified timing-safely.
+- **Success response (200):** `{ success: true, message: 'Two-factor authentication has been disabled.' }`
+- **Validation error (400):** `{ success: false, message: 'Current password is required to disable 2FA.' }` or `{ success: false, message: 'TOTP code is required to disable 2FA.' }` — missing input fields.
+- **Unauthorized (401):** `{ success: false, message: 'Invalid password.' }` — bcrypt comparison failed. Also `{ success: false, message: 'Invalid TOTP code.' }` — timing-safe verification failed.
+- **Not found (404):** `{ success: false, message: 'User not found.' }`
+- **Error response (500):** `{ success: false, message: 'Internal server error' }`
+
+#### `GET /status` — Check whether 2FA is enabled for the current user
+
+Authenticated endpoint (requires valid access token via `authMiddleware`). Looks up the user's `totpEnabled` field and returns a Boolean. Lightweight — no password or secret fields are loaded.
+
+- **Middleware:** `authMiddleware`.
+- **Handler:** `async (req, res) => { ... }`
+- **No request body required.**
+- **Success response (200):** `{ success: true, totpEnabled: <boolean> }`
+- **Not found (404):** `{ success: false, message: 'User not found.' }` — user was deleted after token issuance.
+- **Unauthorized (401):** Handled by `authMiddleware`.
+- **Error response (500):** `{ success: false, message: 'Internal server error' }`
+
+### Exports
+
+| Export | Type | Description |
+|--------|------|-------------|
+| `default` | `express.Router()` | Router instance with 4 TOTP 2FA endpoints mounted at `/api/auth/2fa` via `server.js`. Registered **before** the general `/api/auth` router to prevent Express route collision. |
+
+## 🔄 Changes in this update
+
+- **Task 10 — Replaced console.log with structured logger pino:** Added import for `../utils/logger.js` (`logger`). All four catch blocks across `/setup`, `/verify`, `/disable`, and `/status` no longer call `console.error()` — they now log via `logger.error('[2fa] <METHOD> <PATH> error:', err)`.
 
 ---
 
 ## 📄 `health.js`
 
-Express router dedicated to TCP-based service health checks against GPU compute servers. Default-exports an Express `Router` with two POST endpoints that leverage the `healthChecker.js` utility (in `backend/services/`) to probe the reachability of long-running network services hosted on each PC's configured IP address and ports. Both endpoints are protected by `authMiddleware` (JWT-based authentication) — any authenticated user may invoke health checks. Uses double ObjectId protection: a preemptive `isValidObjectId()` check before database access, plus a Mongoose `CastError` fallback in the catch block — consistent with conventions established in `pcs.js`. Error responses follow the `{ success: false, message }` envelope pattern shared across all route modules.
+---
+
+## 📄 `health.js`
+
+Express router dedicated to TCP-based service health checks against GPU compute servers. Default-exports an Express `Router` with two POST endpoints that leverage the `healthChecker.js` utility (in `backend/services/`) to probe the reachability of long-running network services hosted on each PC's configured IP address and ports. Both endpoints are protected by `authMiddleware` (JWT-based authentication) — any authenticated user may invoke health checks. Also protected by `healthLimiter` rate limiting (10 requests per minute per IP) applied at the router level via `router.use()` to prevent excessive probing. Uses double ObjectId protection: a preemptive `isValidObjectId()` check before database access, plus a Mongoose `CastError` fallback in the catch block — consistent with conventions established in `pcs.js`. Error responses follow the `{ success: false, message }` envelope pattern shared across all route modules.
 
 ### Imports and dependencies
 
@@ -282,14 +487,17 @@ Express router dedicated to TCP-based service health checks against GPU compute 
 | `../models/PC.js` | `PC` (default) | Internal |
 | `../services/healthChecker.js` | `checkPcServices`, `checkAllServices` (named) | Internal |
 | `../middleware/auth.js` | `authMiddleware` (named) | Internal |
+| `../middleware/rateLimit.js` | `healthLimiter` (named) | Internal |
 
 ### Router endpoints
 
 #### `POST /pcs/:pcId` — Health-check services on a single PC
 
-Validates the PC ObjectId parameter, looks up the PC document from MongoDB (404 if not found), then delegates to `checkPcServices()` which iterates the embedded `servicios` array performing per-port TCP probes. Returns structured status data for each service. Protected by `authMiddleware` — requires any authenticated user.
+Validates the PC ObjectId parameter, looks up the PC document from MongoDB (404 if not found), then delegates to `checkPcServices()` which iterates the embedded `servicios` array performing per-port TCP probes. Returns structured status data for each service. Protected by both `healthLimiter` (rate limiting at the router level — 10 requests per minute per IP) and `authMiddleware` (JWT-based authentication) — requires any authenticated user.
 
-- **Middleware:** `authMiddleware` — verifies Bearer JWT; returns 401 on authentication failure.
+- **Middleware:**
+  1. `healthLimiter` — rate limits health-check probes to 10 per minute per IP. Returns 429 if exceeded. Applied via `router.use()` covering all `/check-health/*` routes.
+  2. `authMiddleware` — verifies Bearer JWT; returns 401 on authentication failure.
 - **Handler:** `async (req, res) => { ... }`
 - **Parameters:**
   - `params.pcId`: MongoDB ObjectId string of the target PC.
@@ -301,9 +509,11 @@ Validates the PC ObjectId parameter, looks up the PC document from MongoDB (404 
 
 #### `POST /all` — Health-check services across the entire fleet
 
-Fetches every PC document via `PC.find()` and delegates to `checkAllServices()` which runs `checkPcServices()` on each PC concurrently using `Promise.allSettled`. Individual failures do not abort the sweep — they are wrapped with an `error` field in the per-PC result. Returns an array of per-PC health summaries for the entire monitored fleet. Protected by `authMiddleware` — requires any authenticated user.
+Fetches every PC document via `PC.find()` and delegates to `checkAllServices()` which runs `checkPcServices()` on each PC concurrently using `Promise.allSettled`. Individual failures do not abort the sweep — they are wrapped with an `error` field in the per-PC result. Returns an array of per-PC health summaries for the entire monitored fleet. Protected by both `healthLimiter` (rate limiting at the router level) and `authMiddleware` — requires any authenticated user.
 
-- **Middleware:** `authMiddleware` — verifies Bearer JWT; returns 401 on authentication failure.
+- **Middleware (inherited from router-level):**
+  1. `healthLimiter` — rate limits health-check probes to 10 per minute per IP. Returns 429 if exceeded. Applied via `router.use()` covering all `/check-health/*` routes.
+  2. `authMiddleware` — verifies Bearer JWT; returns 401 on authentication failure.
 - **Handler:** `async (req, res) => { ... }`
 - **No parameters required.**
 - **Success response (200):** `{ success: true, data: [{ pcId, id, services: [...] }, ...] }` — array of per-PC result objects from `checkAllServices()`. Each object is augmented with `pcDocIndex` (original array index). Synchronous failures within an individual PC's handler produce an `error` string field.
@@ -446,3 +656,44 @@ Deletes a user document by `_id`. Performs a preemptive `mongoose.Types.ObjectId
 ## 🔄 Changes in this update
 
 - **T5 — Added `DELETE /:userId` endpoint to `users.js`:** New admin-only endpoint that deletes a user with full last-admin safeguard logic: (1) preemptive ObjectId format validation (400 on invalid), (2) target user lookup (404 if not found), (3) last-admin safeguard — counts current admins, and if only 1 exists, searches for a non-pending candidate (`role !== 'pending'`, different `_id`) to promote to admin before deletion; aborts with 400 if no eligible candidate is found, (4) deletes via `User.findByIdAndDelete()` returning 204 No Content on success. Protected by both `authMiddleware` and `requireAdmin`. Updated the file description to mention three endpoints, added full per-endpoint documentation including safeguard flow details, updated the exports table count from 2 to 3.
+
+## 🔄 Changes in this update
+
+- **Task 3 — Rate limiting on auth routes (`auth.js`):** `POST /register` and `POST /login` are now protected by `authLimiter` imported from `../middleware/rateLimit.js`. This limiter allows only 5 requests per 15-minute window per IP address, providing brute-force protection against credential guessing attacks. Both endpoints now return HTTP 429 (`{ success: false, message: 'Too many requests, please try again later.' }`) when the limit is exceeded. Updated the imports table (added `../middleware/rateLimit.js` entry), updated endpoint descriptions to mention rate limiting, added middleware documentation for both POST endpoints, and added the 429 response shape to both handlers.
+- **Task 3 — Rate limiting on health routes (`health.js`):** The entire health router is now protected by `healthLimiter` imported from `../middleware/rateLimit.js`. The limiter is applied at the router level via `router.use(healthLimiter)`, covering all `/check-health/*` sub-routes. Allows 10 requests per minute per IP to prevent excessive TCP probing. Updated the imports table, file-level description, middleware chains on both endpoints, and added healthLimiter's 429 response behavior documentation.
+
+## 🔄 Changes in this update
+
+- **Password complexity guard added to `POST /register` (`auth.js`):**
+  - **Added `PASSWORD_REGEX` constant** at module level — identical regex pattern from `User.js` model, duplicated for synchronous checking before async DB operations.
+  - **Inserted synchronous password-complexity guard** in the `/register` handler after presence/type checks but *before* any database work (`User.findOne`, `User.countDocuments`). If `PASSWORD_REGEX.test(password)` fails, returns HTTP 400 with `{ success: false, message: 'Password does not meet complexity requirements.' }` immediately — no wasteful bcrypt hashing or DB round-trip occurs for invalid passwords.
+  - This is the **first** defense layer in a three-layer validation chain: (1) sync route guard (`auth.js`), (2) Mongoose schema validator (`User.js` `validate` block), (3) client-side check (`isPasswordStrong` in `LoginPage.jsx`). Together they provide defense-in-depth across client, server handler, and persistence layers.
+  - Updated the `/register` endpoint description to document this new validation step, updated error response documentation to include the complexity-rejection body.
+
+## 🔄 Changes in this update
+
+- **Task 21 — Added `twoFactor.js` router:** New Express router providing four TOTP-based 2FA endpoints mounted at `/api/auth/2fa`. The file is registered in `server.js` **before** the general `/api/auth` router to prevent Express from matching `/auth/2fa` against auth route parameters. Four endpoints:
+  - **`POST /setup`** — Generates a TOTP secret via `speakeasy`, stores it on the user (without enabling 2FA), and returns a QR code data URI + plaintext manual entry code. Requires authentication.
+  - **`POST /verify`** — Dual-mode endpoint: Mode A reads `tempAuthSession` cookie from post-login intercept; Mode B reads `accessToken` cookie for mid-session enablement. Verifies the TOTP code timing-safely (`window: 1`). On success, enables 2FA if not already enabled, revokes all old refresh tokens, issues full session cookies, and clears the temp session.
+  - **`POST /disable`** — Requires both current password (bcrypt comparison) AND a valid TOTP code. On success, clears `totpSecret` and sets `totpEnabled: false`.
+  - **`GET /status`** — Lightweight check returning `{ totpEnabled: boolean }`.
+  All endpoints are rate-limited via `authLimiter`. The module shares helper implementations with `auth.js` (`signAccessToken`, `signRefreshToken`, `setAuthCookies`, `userProfile`) to maintain consistency across the authentication surface.
+
+- **Task 21 — Updated `auth.js` for 2FA integration:**
+  - Added `RefreshToken` model import — auth routes now use a cookie-based two-token architecture (httpOnly `accessToken` + `refreshToken` cookies) instead of returning a bare JWT in the response body.
+  - Added new helpers: `createTempAuthToken(userId)` produces a 5-minute-lifetime temporary token for the 2FA intercept flow; `verifyTempAuthToken(token)` validates temp tokens with dual expiry checking (JWT `exp` claim + embedded timestamp); `parseDurationToMs(duration)` parses JWT duration strings; `signAccessToken(user)`, `signRefreshToken(user)`, and `setAuthCookies(res, ...) ` manage cookie-based sessions.
+  - Added `TEMP_SESSION_TTL_MS` constant (5 minutes).
+  - **Updated `/register`:** First-user admin flow now sets access + refresh cookies instead of returning a bare token. Response body no longer includes `token` — it uses the same `{ success, user }` shape as login.
+  - **Updated `/login`:** Now selects both `+password` and `+totpEnabled` when looking up users. Added the 2FA intercept: if `user.totpEnabled` is true after credential validation, the handler sets a `tempAuthSession` cookie (httpOnly, 5 min TTL, scoped to `/api/auth/2fa/verify`) and returns HTTP 403 with `{ status: '2FA_REQUIRED' }`. Non-2FA users follow the normal flow of revoking old refresh tokens and issuing fresh session cookies.
+  - **Added `/refresh`:** New endpoint for rotating expired access tokens via a valid refresh token cookie. Full rotation architecture including DB lookup, revocation check, and re-issuance.
+  - **Added `/logout`:** Revokes all unrevoked refresh tokens for the authenticated user (best-effort DB write), clears both auth cookies, returns 200 with confirmation message.
+  - **Updated `/me`:** Now performs a MongoDB lookup instead of relying solely on the JWT payload. Returns a safe profile projection.
+  - Updated imports table to include `RefreshToken` import. Updated exports count from 3 to 5 endpoints.
+
+## 🔄 Changes in this update
+
+- **Task 6 — Switch JWT to httpOnly cookies (sameSite fix):** Fixed the `sameSite` cookie policy across all authentication cookies from hardcoded `'strict'` (lowercase) to environment-aware values:
+  - **`auth.js`** — `setAuthCookies()` helper now uses `isProd ? 'Strict' : 'Lax'` for both `accessToken` and `refreshToken` cookies. The `POST /login` handler's `tempAuthSession` cookie (2FA intercept) was similarly updated at the point of issuance.
+  - **`twoFactor.js`** — The duplicated `setAuthCookies()` helper receives the same fix: `sameSite` is `'Strict'` in production, `'Lax'` in development for both `accessToken` and `refreshToken`.
+  - Rationale: `'Strict'` blocks all cross-site requests including those from an external dev proxy or HMR server. `'Lax'` allows the Vite dev server (on a different port) to send cookies while still protecting against CSRF on cross-origin POST/PUT/DELETE. Properly capitalized values (`'Strict'`, `'Lax'`) conform to current browser implementations (some browsers normalize lowercase, but explicit capitalization ensures compliance).
+  - All three "Set both auth cookies" helper descriptions and the 2FA intercept cookie documentation have been updated accordingly.

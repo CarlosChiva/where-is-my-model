@@ -6,3 +6,4 @@
 dist/
 node_modules/
 skills-lock.json
+nginx/certs/

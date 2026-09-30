@@ -4,100 +4,106 @@
 
 ```
 where-is-my-model/
-├── backend/                          # Express + Mongoose API ✅ COMPLETE
+├── backend/                          # Express + Mongoose API
 │   ├── .dockerignore
-│   ├── .env.development              # NODE_ENV, PORT=8080, MONGODB_URI, CLIENT_URL
-│   ├── Dockerfile                    # Node 20 Alpine, single-stage
+│   ├── .env.example                  # [NEW] Template with descriptions (no secrets)
+│   ├── .env.development              # [MODIFIED] No secrets; loaded from external source
+│   ├── Dockerfile                    # [MODIFIED] Non-root user, healthcheck
+│   ├── config/                       # [NEW] Configuration directory
+│   │   └── logger.js                 # [NEW] Pino logger configuration
 │   ├── middleware/
-│   │   ├── auth.js                 # [AUTH] authMiddleware (JWT validation), requireAdmin (role check)
-│   │   └── validation.js           # validatePcBody, validateServiceBody, validateServiceUpdate
+│   │   ├── auth.js                   # [MODIFIED] Cookie-based token, refresh support
+│   │   ├── auditLog.js               # [NEW] Critical action audit logging
+│   │   ├── passwordValidator.js      # [NEW] Password strength validation
+│   │   ├── rateLimit.js              # [NEW] Rate limiter configuration
+│   │   ├── requestId.js              # [NEW] UUID request ID generation
+│   │   ├── ssrfProtection.js         # [NEW] SSRF whitelist validation
+│   │   ├── twoFactor.js              # [NEW] 2FA verification middleware
+│   │   └── validation.js             # [MODIFIED] Input sanitization, transaction-aware GPU cap
 │   ├── models/
-│   │   ├── PC.js                  # Schema: {nombre, ip, vram, servicios[]}, virtual totalGpu, GPU cap validator
-│   │   └── User.js                # [AUTH] Schema: {username (unique), password (bcrypt), role ('admin'|'user'|'pending')}
+│   │   ├── AuditLog.js               # [NEW] Audit trail model
+│   │   ├── PC.js                     # [UNCHANGED] Multi-GPU schema
+│   │   └── User.js                   # [MODIFIED] Email, 2FA fields, password complexity
 │   ├── routes/
-    │   │   ├── auth.js            # [AUTH] POST /register, POST /login, GET /me, GET /users, PUT /users/:userId/role
-    │   │   ├── pcs.js             # GET /, GET /:id, POST /, PUT /:id, DELETE /:id (+ auth middleware)
-    │   │   ├── services.js        # GET /, POST /, PUT /:index, DELETE /:index (+ auth middleware)
-    │   │   └── health.js          # POST /check-health/pcs/:pcId, POST /check-health/all
-    │   ├── services/
-    │   │   └── healthChecker.js   # TCP connect checker (net module, ESM)
-    │   ├── seed.js                # Manual seed from data.json
-│   ├── server.js                 # Entry: MongoDB connect, auto-seed, route registration (+ auth routes), listen(8080)
-│   ├── package.json
+│   │   ├── auth.js                   # [MODIFIED] Cookie JWT, refresh tokens, 2FA endpoints
+│   │   ├── health.js                 # [MODIFIED] SSRF-protected health checks
+│   │   ├── pcs.js                    # [MODIFIED] Audit logging, transaction support
+│   │   ├── services.js               # [MODIFIED] Audit logging, transaction support
+│   │   └── verify.js                 # [NEW] Email verification routes
+│   ├── seed-admin.js                 # [NEW] Initial admin seed from env vars
+│   ├── server.js                     # [MODIFIED] Helmet, logger, request ID, cookie-parser, CORS credentials
+│   ├── services/
+│   │   ├── emailService.js           # [NEW] Nodemailer email sending
+│   │   └── healthChecker.js          # [MODIFIED] SSRF protection, structured logging
+│   ├── utils/
+│   │   └── sanitize.js               # [NEW] Input sanitization utilities
+│   ├── package.json                  # [MODIFIED] New security dependencies
 │   └── package-lock.json
 │
-├── frontend/                         # React + Vite + Tailwind ✅ COMPLETE
+├── frontend/                         # React + Vite + Tailwind
 │   ├── .dockerignore
-│   ├── .env                          # VITE_API_PROXY_TARGET=http://backend:8080
-│   ├── .env.development              # VITE_API_PROXY_TARGET=http://localhost:9003
-│   ├── Dockerfile                    # 3 stages: dev (Vite), build, production (nginx)
-│   ├── eslint.config.js
-│   ├── index.html                    # Vite entry + Google Fonts
-│   ├── nginx.conf                    # Production: SPA fallback, /api proxy to backend
-│   ├── postcss.config.js
-│   ├── tailwind.config.js            # Full theme: colors, fonts, animations, keyframes, screens
-│   ├── vite.config.js                # React plugin, port 3000, /api proxy
-│   ├── package.json                  # react 19, vite 8, tailwind 3.4
+│   ├── .env                          # [UNCHANGED] VITE_API_PROXY_TARGET=http://backend:8080
+│   ├── .env.development              # [UNCHANGED] VITE_API_PROXY_TARGET=http://localhost:9003
+│   ├── Dockerfile                    # [MODIFIED] Non-root user, healthcheck
+│   ├── eslint.config.js              # [UNCHANGED]
+│   ├── index.html                    # [UNCHANGED]
+│   ├── nginx.conf                    # [MODIFIED] CSP, HSTS, Permissions-Policy, full security headers
+│   ├── postcss.config.js             # [UNCHANGED]
+│   ├── tailwind.config.js            # [UNCHANGED]
+│   ├── vite.config.js                # [MODIFIED] Cookie credentials in proxy
+│   ├── package.json                  # [UNCHANGED]
 │   ├── package-lock.json
 │   ├── public/icons.svg
 │   └── src/
-│       ├── main.jsx                  # ReactDOM.createRoot('#app', <App />)
-│       ├── App.jsx                   # Modal router, 8 hooks, 6 callback handlers
-│       ├── index.css                 # @tailwind directives
+│       ├── main.jsx                  # [UNCHANGED]
+│       ├── App.jsx                   # [UNCHANGED]
+│       ├── index.css                 # [UNCHANGED]
 │       ├── components/
-│       │   ├── Header.jsx            # Title, server/service counts, Add PC + Save buttons
-│       │   ├── PCGrid.jsx            # Responsive 3→2→1 grid, loading/empty states
-│       │   ├── PCCard.jsx            # Name, IP, service count, ServiceRow[], GPUDetails, actions
-│       │   ├── ServiceRow.jsx        # Name, port badge, GPUBar, edit/delete buttons
-│       │   ├── GPUBar.jsx            # Per-service bar (color + animation via --gpu-target-width)
-│       │   ├── GPUDetails.jsx        # Aggregate bar with "TOTAL GPU" label + percentage text
-│       │   └── Modals/
-│       │       ├── AddPcModal.jsx    # Form: nombre, ip, vram + live validation
-│       │       ├── EditPcModal.jsx   # Pre-filled form, dispatches with _id
-│       │       ├── AddServiceModal.jsx # Form: nombre, puerto, gpu + VRAM cap check
-│       │       ├── EditServiceModal.jsx # Pre-filled, recalc cap (frees old allocation)
-│       │       └── DeleteConfirmModal.jsx # Warning message, auto-close on confirm
-│       │   └── GpuCalculator/              # [NEW] Feature folder for GPU Calculator page
-│       │       ├── GPUCalculatorPage.jsx              # Page container, form state, results orchestration
-│       │       ├── ModelFormSection.jsx               # 📐 Architecture fields group (5 number inputs)
-│       │       ├── PrecisionFormSection.jsx           # 🔢 Quantization fields group (2 selects)
-│       │       ├── HardwareFormSection.jsx            # 🖥️ Hardware fields group (2 number inputs)
-│       │       ├── WorkloadFormSection.jsx            # 🎯 Workload target fields group (5 number inputs)
-│       │       └── ResultsDisplay.jsx                 # Visual bars + numbers with gpu color thresholds
-    │       ├── hooks/
-    │       │   ├── usePcs.js             # GET all PCs on mount, refetch
-    │       │   └── useServiceHealth.js   # [NEW] TCP health status state + auto-check on load
-│       │   ├── useCreatePc.js        # POST new PC
-│       │   ├── useUpdatePc.js        # PUT update PC
-│       │   ├── useDeletePc.js        # DELETE PC
-│       │   ├── useServices.js        # GET services by pcId
-│       │   ├── useCreateService.js   # POST service to PC
-│       │   ├── useUpdateService.js   # PUT service by index
-│       │   └── useDeleteService.js   # DELETE service by index
-    │       ├── services/
-    │       │   ├── apiClient.js          # Unified fetch wrapper (get, post, put, del)
-    │       │   └── healthApi.js          # [NEW] checkPcHealth, checkAllHealth wrappers
-│       │   ├── pcApi.js              # fetchPcs, createPc, updatePc, deletePc
-│       │   └── serviceApi.js         # fetchServices, createService, updateService, deleteService
+│       │   ├── Header.jsx            # [UNCHANGED]
+│       │   ├── PCGrid.jsx            # [UNCHANGED]
+│       │   ├── PCCard.jsx            # [UNCHANGED]
+│       │   ├── ServiceRow.jsx        # [UNCHANGED]
+│       │   ├── GPUBar.jsx            # [UNCHANGED]
+│       │   ├── GPUDetails.jsx        # [UNCHANGED]
+│       │   ├── LoginPage.jsx         # [MODIFIED] Password strength indicator
+│       │   ├── TwoFactorSetup.jsx    # [NEW] 2FA QR code setup
+│       │   ├── TwoFactorVerify.jsx   # [NEW] TOTP code input
+│       │   └── Modals/               # [UNCHANGED]
+│       │   └── GpuCalculator/        # [UNCHANGED]
+│       ├── context/
+│       │   └── AuthContext.jsx       # [MODIFIED] Cookie-based auth, auto token refresh
+│       ├── hooks/                    # [UNCHANGED]
+│       ├── services/
+│       │   ├── apiClient.js          # [MODIFIED] credentials: include, 401 refresh interceptor
+│       │   ├── authApi.js            # [MODIFIED] Add refresh, 2FA endpoints
+│       │   └── (rest unchanged)
 │       └── utils/
-│           ├── gpuHelpers.js         # getGpuColorClass, clamp (REUSED by calculator)
-│           ├── slugify.js            # URL-safe slug (unused)
-│           ├── validators.js         # validatePcForm, validateServiceForm
-│           └── calculatorEngine.js   # [NEW] Pure calc functions: model size, KV cache, VRAM breakdown
+│           ├── validators.js         # [MODIFIED] Password strength validator
+│           └── (rest unchanged)
 │
-├── docker-compose.yml                # 3 services: frontend (3000), backend (9003:8080), mongo (27017)
-├── data.json                         # Sample seed data (3 PCs, 8 services)
-├── docs/                             # Documentation
+├── nginx/                            # [NEW] Production reverse proxy
+│   ├── default.conf                  # [NEW] TLS termination, security headers, API routing
+│   └── ssl/                          # [NEW] Certificate directory
+│
+├── backup/                           # [NEW] MongoDB backup automation
+│   ├── Dockerfile                    # [NEW] mongodump container
+│   └── backup.sh                     # [NEW] Backup script with rotation
+│
+├── docker-compose.yml                # [MODIFIED] Auth, healthchecks, secrets, nginx proxy, backup
+├── docker-compose.backup.yml         # [NEW] Optional backup compose
+├── data.json                         # [UNCHANGED]
+├── .gitignore                        # [MODIFIED] Add backend/.env.*, .env.local
+├── docs/                             # [UNCHANGED]
 │   ├── REQUIREMENTS.md
 │   ├── PROJECT_STRUCTURE.md
 │   ├── FRAMEWORKS.md
 │   ├── PROJECT_STATE.md
-│   └── documentation/                # Generated docs
+│   └── documentation/
 │
-├── LEGACY (unused by React build):
-│   ├── index.html                    # Vanilla entry point (loads css/ + js/)
-│   ├── css/                          # styles.css, base.css, layout.css, components.css, animations.css
-│   └── js/                           # app.js, data.js, editors.js, models.js, views.js
+└── LEGACY (unused by React build):
+    ├── index.html
+    ├── css/
+    └── js/
 ```
 
 ## Data Flow
@@ -106,7 +112,49 @@ React UI (port 3000) → Vite proxy /api → Backend (port 8080, host 9003) → 
 ```
 
 ## Data Model
-- **PC**: `{ _id: ObjectId, nombre: String, ip: String, vram: Number, servicios: [Service] }`
-- **Service** (embedded): `{ nombre: String, puerto: Number, gpu: Number }` (no `_id`)
-- **Virtual field**: `totalGpu` computed via Mongoose virtual = `sum(servicios[].gpu)`
-- **Validator**: `sum(servicios[].gpu) <= pc.vram` at document level
+- **PC**: `{ _id: ObjectId, nombre: String, ip: String, gpus: [{name, vram}], servicios: [Service] }`
+- **Service** (embedded): `{ nombre: String, puerto: Number, gpu: Number, assignedGpu: Number }` (no `_id`)
+- **Virtual field**: `gpuUsage` returns per-GPU utilization array
+- **Validator**: Per-GPU capacity: `sum(services where assignedGpu===i).gpu <= gpus[i].vram`
+
+## Security Architecture (Post-Implementation)
+
+### Middleware Order (server.js)
+```
+CORS → Helmet → Rate Limit → cookie-parser → Request ID → Auth → Routes
+```
+
+### Token Flow
+```
+Login → access token (15min, cookie) + refresh token (7d, httpOnly cookie)
+API call → 401 → auto-refresh → retry original request
+```
+
+### MongoDB
+- Authentication enabled via `MONGO_INITDB_ROOT_USERNAME` / `MONGO_INITDB_ROOT_PASSWORD`
+- Replica set for transactions (Task 19)
+- Automated backups via mongodump (Task 16)
+
+### Docker
+- Non-root users in all containers
+- Healthchecks on frontend, backend, MongoDB
+- Nginx reverse proxy with TLS termination (production)
+
+## High-Risk Files
+
+| File | Risk | Reason |
+|------|------|--------|
+| `frontend/src/context/AuthContext.jsx` | **HIGH** | localStorage→cookie rewrite, StrictMode guard changes |
+| `frontend/src/services/apiClient.js` | **HIGH** | credentials: include, 401 refresh interceptor |
+| `backend/routes/auth.js` | **HIGH** | Cookie JWT, password validation, refresh, email, admin seed, 2FA |
+| `backend/server.js` | **MEDIUM** | Multiple middleware additions, order-critical |
+| `backend/middleware/validation.js` | **MEDIUM** | Transaction scope, input sanitization |
+| `docker-compose.yml` | **MEDIUM** | New services, env vars, healthchecks, secrets |
+
+## Architectural Risks
+
+1. **MongoDB single-node → replica set** (Task 19): Breaking change for Docker Compose
+2. **CORS + credentials conflict** (Task 6): `origin` cannot be `*` with `credentials: 'include'`
+3. **Volume permissions** (Task 13): Non-root user conflicts with host-mounted volumes
+4. **Git history contamination** (Task 2): JWT_SECRET in git history — requires `git filter-repo`
+5. **API versioning blast radius** (Task 23): `/api/*` → `/api/v1/*` breaks all frontend calls

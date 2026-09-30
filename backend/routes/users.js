@@ -2,6 +2,8 @@ import express from 'express';
 import mongoose from 'mongoose';
 import User from '../models/User.js';
 import { authMiddleware, requireAdmin } from '../middleware/auth.js';
+import logger from '../utils/logger.js';
+import { sanitizeMiddleware } from '../middleware/sanitization.js';
 
 const router = express.Router();
 
@@ -19,7 +21,7 @@ router.get('/', authMiddleware, requireAdmin, async (req, res) => {
     }));
     res.json({ success: true, data: userList });
   } catch (err) {
-    console.error('[users] GET / error:', err);
+    logger.error('[users] GET / error:', err);
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
@@ -28,7 +30,7 @@ router.get('/', authMiddleware, requireAdmin, async (req, res) => {
 /*  PUT /:userId/role — Change user role (admin only)                  */
 /* ------------------------------------------------------------------ */
 
-router.put('/:userId/role', authMiddleware, requireAdmin, async (req, res) => {
+router.put('/:userId/role', authMiddleware, requireAdmin, sanitizeMiddleware, async (req, res) => {
   try {
     /* Validate ObjectId format early */
     if (!mongoose.Types.ObjectId.isValid(req.params.userId)) {
@@ -69,7 +71,7 @@ router.put('/:userId/role', authMiddleware, requireAdmin, async (req, res) => {
         message: 'Invalid user ID format.',
       });
     }
-    console.error('[users] PUT /:userId/role error:', err);
+    logger.error('[users] PUT /:userId/role error:', err);
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
@@ -125,7 +127,7 @@ router.delete('/:userId', authMiddleware, requireAdmin, async (req, res) => {
         message: 'Invalid user ID format.',
       });
     }
-    console.error('[users] DELETE /:userId error:', err);
+    logger.error('[users] DELETE /:userId error:', err);
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
