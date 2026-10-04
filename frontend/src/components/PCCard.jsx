@@ -86,7 +86,7 @@ export default function PCCard({
         {isAdmin && (
           <button
             type="button"
-            className="bg-accent text-bg-primary font-semibold px-3 py-2 rounded-md shadow-btn-primary hover:bg-accent-hover transition-colors flex-1"
+            className="bg-btn-primary text-btn-primary-fg font-semibold px-3 py-2 rounded-md shadow-btn-primary hover:bg-btn-primary-hover transition-colors flex-1"
             aria-label={`Edit server ${pc?.nombre ?? ''}`}
             onClick={() => onEditPc(pc)}
           >

@@ -36,7 +36,7 @@ export default function AdminPanel() {
           <button
             type="button"
             onClick={refetch}
-            className="w-full bg-accent text-bg-primary font-semibold px-4 py-2.5 rounded-md shadow-btn-primary hover:bg-accent-hover transition-colors"
+            className="w-full bg-btn-primary text-btn-primary-fg font-semibold px-4 py-2.5 rounded-md shadow-btn-primary hover:bg-btn-primary-hover transition-colors"
           >
             Retry
           </button>

@@ -5,18 +5,23 @@ import { authMiddleware, requireAdmin } from '../middleware/auth.js';
 import logger from '../utils/logger.js';
 import { sanitizeMiddleware } from '../middleware/sanitization.js';
 
-const router = express.Router();
+// `mergeParams: true` is required: the router is mounted at
+// `${API_PREFIX}/pcs/:pcId/services` (see server.js), and Express 4 sub-routers
+// do NOT merge the mount's `:pcId` param into req.params by default. With
+// mergeParams enabled, the mount param is merged so `req.params.pcId` is
+// available in every route below.
+const router = express.Router({ mergeParams: true });
 
 /* ------------------------------------------------------------------ */
-/*  Helper: extract pcId from req.baseUrl (Express strips the mount     */
-/*  prefix including :pcId params when a sub-router is involved)       */
-/*  E.g. req.baseUrl === '/api/pcs/:pcId/services' at runtime          */
+/*  Helper: extract pcId from req.params. Because the router is created*/
+/*  with `mergeParams: true` (see above), the mount's `:pcId` param is */
+/*  merged into req.params inside this router. req.baseUrl at runtime */
+/*  is /api/v1/pcs/<id>/services.                                     */
 /* ------------------------------------------------------------------ */
 
 function getPcId(req) {
-  // req.baseUrl at mount point: /api/pcs/<id>/services
-  const parts = req.baseUrl.match(/\/api\/pcs\/([^/]+)/);
-  return parts ? parts[1] : req.params.pcid;
+  // mergeParams:true merges the mount's :pcId param into req.params.
+  return req.params.pcId;
 }
 
 /* ------------------------------------------------------------------ */

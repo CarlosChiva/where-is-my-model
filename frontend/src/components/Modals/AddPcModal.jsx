@@ -116,7 +116,7 @@ export default function AddPcModal({ onSave, onClose, loading = false, error = n
         role="dialog"
         aria-modal="true"
         aria-label="Add new server"
-        className="bg-bg-card rounded-lg border border-border shadow-[0_16px_64px_rgba(0,0,0,0.55)_0_4px_16px_rgba(0,0,0,0.3)] animate-dialog-fade w-full max-w-none md:max-w-[420px] h-screen md:h-auto p-5 md:p-6 lg:p-8 rounded-none md:rounded-lg m-0 md:m-4"
+        className="bg-bg-card rounded-lg border border-border shadow-dialog animate-dialog-fade w-full max-w-none md:max-w-[420px] h-screen md:h-auto p-5 md:p-6 lg:p-8 rounded-none md:rounded-lg m-0 md:m-4"
       >
         <h2 className="text-xl font-bold text-text-primary mb-6">Add New Server</h2>
 
@@ -247,7 +247,7 @@ export default function AddPcModal({ onSave, onClose, loading = false, error = n
           <button
             type="submit"
             disabled={loading}
-            className="flex-1 bg-accent text-bg-primary font-semibold px-4 py-2.5 rounded-md shadow-btn-primary hover:bg-accent-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            className="flex-1 bg-btn-primary text-btn-primary-fg font-semibold px-4 py-2.5 rounded-md shadow-btn-primary hover:bg-btn-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
             {loading && (
               <svg

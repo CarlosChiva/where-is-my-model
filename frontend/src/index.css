@@ -1,3 +1,79 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+:root {
+  /* Tema oscuro (por defecto) */
+  --bg: 0 0 0;
+  --surface-dim: 5 8 13;
+  --surface: 16 24 38;
+  --line: 27 42 64;
+  --line-strong: 90 118 153;
+  --fg: 232 251 255;
+  --fg-2: 180 196 216;
+  --fg-3: 127 147 173;
+  --link: 0 207 255;
+  --link-hover: 232 251 255;
+  --btn-primary-bg: 61 255 18;
+  --btn-primary-fg: 0 0 0;
+  --btn-primary-hover-bg: 232 251 255;
+  --container: 6 38 58;
+  --on-container: 0 207 255;
+  --violet: 167 139 255;
+  --success: 61 255 18;
+  --info: 0 207 255;
+  --warn: 255 176 32;
+  --err: 255 77 109;
+  --deep-blue: 0 102 204;
+  --accent-dim: rgba(0, 207, 255, .15);
+  --shadow: 0 0 28px rgba(0, 207, 255, .35);
+  --btn-glow: 0 0 28px rgba(61, 255, 18, .35);
+  --card-shadow: none;
+  --focus: #00CFFF;
+  --selection: rgba(0, 207, 255, .35);
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  /* Tema claro "Azul sobre papel" */
+  --bg: 238 242 246;
+  --surface-dim: 227 234 241;
+  --surface: 255 255 255;
+  --line: 211 220 230;
+  --line-strong: 82 102 127;
+  --fg: 5 8 13;
+  --fg-2: 52 70 92;
+  --fg-3: 82 102 127;
+  --link: 0 102 204;
+  --link-hover: 0 68 170;
+  --btn-primary-bg: 0 102 204;
+  --btn-primary-fg: 255 255 255;
+  --btn-primary-hover-bg: 0 68 170;
+  --container: 220 235 250;
+  --on-container: 0 68 170;
+  --violet: 107 63 224;
+  --success: 24 112 0;
+  --info: 0 110 153;
+  --warn: 143 84 0;
+  --err: 200 30 69;
+  --deep-blue: 0 102 204;
+  --accent-dim: rgba(0, 102, 204, .12);
+  --shadow: 0 2px 12px rgba(0, 68, 170, .12);
+  --btn-glow: none;
+  --card-shadow: 0 2px 12px rgba(0, 68, 170, .12);
+  --focus: #0066CC;
+  --selection: rgba(0, 207, 255, .30);
+  color-scheme: light;
+}
+
+body { background: var(--bg); color: var(--fg); }
+::selection { background: var(--selection); color: var(--fg); }
+h1, h2, h3, h4 { font-family: 'Chakra Petch', 'Segoe UI', sans-serif; text-wrap: balance; }
+button { font-family: 'Chakra Petch', 'Segoe UI', sans-serif; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+@media (prefers-reduced-motion: no-preference) {
+  a, button, input, select { transition: background-color 150ms, border-color 150ms, color 150ms, box-shadow 150ms; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+}

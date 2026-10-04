@@ -36,8 +36,8 @@ No test or typecheck commands exist. Lint is frontend only (`npm run lint`).
 
 ## Architecture notes
 - **Entry points**: `frontend/src/main.jsx` -> `App.jsx`; `backend/server.js`.
-- **Route order matters**: `/api/pcs/:pcId/services` is registered BEFORE `/api/pcs` to avoid Express matching `:id` against a real `pcId`. See `backend/server.js:42`.
-- **API proxy**: Frontend requests hit `/api/*`, Vite proxies to backend at runtime via env var. No hardcoded URLs in fetch calls — all go through `frontend/src/services/apiClient.js` which prefixes with `/api`.
+- **Route order matters**: `/api/v1/pcs/:pcId/services` is registered BEFORE `/api/v1/pcs` to avoid Express matching `:id` against a real `pcId`. See `backend/server.js:205` (services mount) and `backend/server.js:216` (pcs mount).
+- **API proxy**: Frontend requests hit `/api/v1/*`, Vite proxies to backend at runtime via env var. No hardcoded URLs in fetch calls — all go through `frontend/src/services/apiClient.js` which prefixes with `API_BASE = '/api/v1'` (`frontend/src/services/apiClient.js:1`).
 - **Response shape**: `apiClient._request()` returns `{ data, error }`. Hooks and components must check `result.error` not catch exceptions.
 
 ## Data model (changed for multi-GPU)

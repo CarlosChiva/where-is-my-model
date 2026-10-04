@@ -354,7 +354,7 @@ export default function App() {
           type="button"
           onClick={handleOpenAddPc}
           aria-label="Add PC"
-          className="fixed bottom-6 right-6 z-40 w-12 h-12 md:w-14 md:h-14 rounded-full bg-accent text-bg-primary shadow-fab hover:bg-accent-hover active:scale-95 transition-all flex items-center justify-center focus:outline-none focus:ring-[0_0_0_3px] focus:ring-accent-dim"
+          className="fixed bottom-6 right-6 z-40 w-12 h-12 md:w-14 md:h-14 rounded-full bg-btn-primary text-btn-primary-fg shadow-fab hover:bg-btn-primary-hover active:scale-95 transition-all flex items-center justify-center focus:outline-none focus:ring-[0_0_0_3px] focus:ring-accent-dim"
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"

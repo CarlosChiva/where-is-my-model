@@ -42,7 +42,7 @@ export default function DeleteConfirmModal({ isOpen, message, onConfirm, onCance
         role="dialog"
         aria-modal="true"
         aria-label="Confirm delete"
-        className="bg-bg-card rounded-lg border border-border shadow-[0_16px_64px_rgba(0,0,0,0.55)_0_4px_16px_rgba(0,0,0,0.3)] animate-dialog-fade w-full max-w-none md:max-w-[420px] h-screen md:h-auto p-5 md:p-6 lg:p-8 rounded-none md:rounded-lg m-0 md:m-4"
+        className="bg-bg-card rounded-lg border border-border shadow-dialog animate-dialog-fade w-full max-w-none md:max-w-[420px] h-screen md:h-auto p-5 md:p-6 lg:p-8 rounded-none md:rounded-lg m-0 md:m-4"
       >
         <h2 className="text-xl font-bold text-text-primary mb-6">Confirm Delete</h2>
 
