@@ -1,7 +1,7 @@
 # `middleware`
 
 > Path: `backend/middleware/`
-> Last updated: 2026-07-18 (Task 24 — Input Sanitization Middleware)
+> Last updated: 2026-10-04 (Task A — `extractPcId()` fix: versioned services mount + `mergeParams`)
 > Type: Leaf folder
 
 Request validation middleware for the Express backend. Provides middleware functions used as route handlers on PC creation/update and service creation/update endpoints. All validators follow a collect-all-errors pattern (rather than fail-fast) and return a single 400 response with an `errors` array when validation fails. A legacy fallback auto-transforms a scalar `vram` field into the new `gpus` array format for backward compatibility. Also includes rate-limiting middleware via `express-rate-limit` v7 to protect against abuse — three distinct limiters target the global API surface, authentication endpoints, and health-check probes respectively.
@@ -34,13 +34,13 @@ Contains request-body validation middleware functions for PC and Service routes,
   - **Legacy fallback**: If the request body contains a scalar `vram` instead of a `gpus` array, it is automatically transformed to `[{ name: "GPU 1", vram: <value> }]` before validation. This supports backward compatibility with older clients.
   - **Returns:** nothing; calls `next()` on success or returns `res.status(400).json({ success: false, errors })` with a collected array of error strings on failure.
 
-- **`extractPcId(req: Request) → string | null`**
-  Internal helper for routes mounted under `/api/pcs/:pcId` using sub-routers. When Express uses `app.use('/path/:id', router)`, the mount-point parameters (`:pcId`) are stripped from `req.params` inside the sub-router. This function extracts `pcId` by matching against `req.baseUrl`. Falls back to checking `req.params.pciId` and `req.params[':pciId']` for edge cases.
+- **`extractPcId(req: Request) → string | undefined`**
+  Internal helper for the services router mounted under `/api/v1/pcs/:pcId/services`. The services router (`routes/services.js`) is created with `mergeParams: true` and mounted at `${API_PREFIX}/pcs/:pcId/services` in `server.js`, so the mount's `:pcId` parameter is merged into `req.params` for every middleware in that router. This function simply returns `req.params.pcId`.
   - `req`: The Express request object.
-  - **Returns:** The parsed `pcId` string, or `null` if not found.
+  - **Returns:** The `pcId` string from `req.params.pcId` (the mount parameter merged into `req.params` by `mergeParams: true`).
 
 - **`validateServiceBody(req: Request, res: Response, next: NextFunction) → void | Response`** *(async)*
-  Validation middleware used on `POST /api/pcs/:pcId/services`. Validates four fields and enforces a **per-GPU VRAM-cap** by performing an asynchronous MongoDB lookup of the parent PC. Supports Multi-GPU architecture: each service is assigned to one of the PC's GPUs via the `assignedGpu` index, and only that GPU's individual VRAM is checked against capacity.
+  Validation middleware used on `POST /api/v1/pcs/:pcId/services`. Validates four fields and enforces a **per-GPU VRAM-cap** by performing an asynchronous MongoDB lookup of the parent PC. Supports Multi-GPU architecture: each service is assigned to one of the PC's GPUs via the `assignedGpu` index, and only that GPU's individual VRAM is checked against capacity.
   - **`nombre`**: Must be a non-empty string.
   - **`puerto`**: Must be an integer between 1 and 65535.
   - **`gpu`**: Must be a number >= 0. If it passes basic validation, checks that adding this `gpu` value to the **target GPU's** existing allocation does not exceed the target GPU's individual VRAM (i.e., `pc.gpus[assignedGpu].vram`). Uses `pc.servicios.filter(svc => svc.assignedGpu === assignedGpu)` to sum only services on the same GPU.
@@ -49,7 +49,7 @@ Contains request-body validation middleware functions for PC and Service routes,
   - **Returns:** nothing; calls `next()` on success or returns an appropriate HTTP response (400/404/500) on failure.
 
 - **`validateServiceUpdate(req: Request, res: Response, next: NextFunction) → void | Response`** *(async)*
-  Validation middleware used on `PUT /api/pcs/:pcId/services/:serviceIndex`. Performs partial-update-aware validation (each field is only validated if present in the request body). Fully rewritten to support **Multi-GPU architecture**: performs per-GPU capacity accounting that subtracts the existing service's allocation from its current GPU, adds the new allocation to the target GPU, and handles cross-GPU reassignment by independently verifying both source and target GPU capacities.
+  Validation middleware used on `PUT /api/v1/pcs/:pcId/services/:serviceIndex`. Performs partial-update-aware validation (each field is only validated if present in the request body). Fully rewritten to support **Multi-GPU architecture**: performs per-GPU capacity accounting that subtracts the existing service's allocation from its current GPU, adds the new allocation to the target GPU, and handles cross-GPU reassignment by independently verifying both source and target GPU capacities.
   - **Lookup**: Fetches the parent PC via `extractPcId(req)`. Parses `req.params.serviceIndex` to locate the specific service within `pc.servicios[ index ]`. Returns 404 if either lookup fails. Stores `existingService.assignedGpu` as `currentGpuIndex` for use in capacity projections.
   - **`nombre`** (only if present in body): Must be a non-empty string.
   - **`puerto`** (only if present in body): Must be an integer between 1 and 65535.
@@ -62,6 +62,10 @@ Contains request-body validation middleware functions for PC and Service routes,
   - **Resolved `assignedGpu`**: When present in the body, the validated `rawAssignedGpu` value is stored on `req.body.assignedGpu` for downstream route handlers.
   - If the parent PC is not found in the database, returns 404. If the database lookup throws, returns 500.
   - **Returns:** nothing; calls `next()` on success or returns an appropriate HTTP response (400/404/500) on failure.
+
+## 🔄 Changes in this update
+
+- **Task A — `extractPcId()` fix (versioned services mount + `mergeParams`):** `extractPcId()` now returns `req.params.pcId` directly, relying on the services router's `mergeParams: true` (mounted at the versioned `${API_PREFIX}/pcs/:pcId/services` path in `server.js`) to merge the mount's `:pcId` parameter into `req.params`. This makes `validateServiceBody` and `validateServiceUpdate` resolve the parent PC correctly on `POST/PUT /api/v1/pcs/<pcId>/services`. The helper's header comment was updated to describe the versioned mount and `mergeParams: true`. Route references in the `validateServiceBody` / `validateServiceUpdate` entries were corrected to the versioned `/api/v1/pcs/:pcId/services` mount.
 
 ---
 

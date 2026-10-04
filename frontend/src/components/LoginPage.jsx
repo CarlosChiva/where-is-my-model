@@ -150,8 +150,8 @@ export default function LoginPage() {
                           ? strength.score <= 1
                             ? 'bg-danger'
                             : strength.score <= 3
-                              ? 'bg-yellow-500'
-                              : 'bg-green-500'
+                              ? 'bg-gpu-yellow'
+                              : 'bg-gpu-green'
                           : 'bg-bg-input border border-border'
                       }`}
                     />
@@ -159,7 +159,7 @@ export default function LoginPage() {
                 </div>
                 <p className={`text-xs ${
                   strength.score >= 4
-                    ? 'text-green-600 dark:text-green-400'
+                    ? 'text-gpu-green'
                     : 'text-text-muted'
                 }`}>
                   {strength.score >= 4
@@ -193,7 +193,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full bg-accent text-bg-primary font-semibold px-4 py-2.5 rounded-md shadow-btn-primary hover:bg-accent-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            className="w-full bg-btn-primary text-btn-primary-fg font-semibold px-4 py-2.5 rounded-md shadow-btn-primary hover:bg-btn-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
             {isLoading && (
               <svg

@@ -1,7 +1,7 @@
 # `routes`
 
 > Path: `backend/routes/`
-> Last updated: 2026-07-18 (Task 10 — Replace console.log with structured logger pino)
+> Last updated: 2026-10-04 (Services router `mergeParams: true` fix + versioned `/api/v1` mount)
 > Type: Leaf folder
 
 Express route modules for the API server. Each file exports a single `express.Router()` instance with RESTful endpoints, unified error handling, and standardized `{ success, data? }` response envelopes. Authentication routes now use a cookie-based two-token architecture (short-lived access tokens + long-lived refresh tokens) and include TOTP-based 2FA intercept in the login flow.
@@ -111,7 +111,7 @@ Deletes a PC document by `_id`. Embedded `servicios` subdocuments are removed au
 
 ## 📄 `services.js`
 
-REST router for embedded Service CRUD operations within a given PC. Default-exports an Express `Router` with four endpoints covering list, create, update, and delete operations on the `pc.servicios[]` subdocument array. Services are identified by **array index** (not ObjectId) because they are defined with `_id: false` in the Mongoose schema. All mutations use live Mongoose documents (non-lean) so that `.save()` triggers the document-level GPU-cap validator (`path('servicios')` validator enforcing per-GPU capacity: `sum(svc.gpu where assignedGpu===i) ≤ gpus[i].vram`). Responses follow the same envelope as `pcs.js`: `{ success: boolean, data?: ..., errors?: string[], message?: string }`. CastError exceptions (invalid ObjectId format) are caught and return 400 with a descriptive message.
+REST router for embedded Service CRUD operations within a given PC. Default-exports an Express `Router` created with `{ mergeParams: true }` (i.e. `express.Router({ mergeParams: true })`) with four endpoints covering list, create, update, and delete operations on the `pc.servicios[]` subdocument array. The `mergeParams: true` option is load-bearing: the router is mounted at `/api/v1/pcs/:pcId/services` in `server.js`, and Express 4 sub-routers do **not** merge the mount's `:pcId` parameter into `req.params` by default — without it, `req.params.pcId` would be `undefined` in every handler below. Services are identified by **array index** (not ObjectId) because they are defined with `_id: false` in the Mongoose schema. All mutations use live Mongoose documents (non-lean) so that `.save()` triggers the document-level GPU-cap validator (`path('servicios')` validator enforcing per-GPU capacity: `sum(svc.gpu where assignedGpu===i) ≤ gpus[i].vram`). Responses follow the same envelope as `pcs.js`: `{ success: boolean, data?: ..., errors?: string[], message?: string }`. CastError exceptions (invalid ObjectId format) are caught and return 400 with a descriptive message.
 
 ### Imports and dependencies
 
@@ -120,6 +120,13 @@ REST router for embedded Service CRUD operations within a given PC. Default-expo
 | `express` | `express` (default) | External |
 | `../models/PC.js` | `PC` (default) | Internal |
 | `../middleware/validation.js` | `validateServiceBody`, `validateServiceUpdate` (named) | Internal |
+
+### Functions
+
+- **`getPcId(req: Request) → string`**
+  Extracts the parent PC's ObjectId from the request so the handlers can load the correct PC document. Because the router is created with `mergeParams: true`, the mount's `:pcId` parameter (from the `/api/v1/pcs/:pcId/services` mount in `server.js`) is merged into `req.params`, so this helper simply returns `req.params.pcId`. The previous implementation parsed `req.baseUrl` with a regex (`/\/api\/pcs\/([^/]+)/`) and fell back to `req.params.pcid` — that was broken, because Express 4 sub-routers do not merge mount parameters into `req.params` by default, so the regex/fallback could not reliably recover the `pcId`.
+  - `req`: The Express request object.
+  - **Returns:** The parent PC's ObjectId string (`req.params.pcId`).
 
 ### Router endpoints
 
@@ -191,7 +198,7 @@ Parses the integer index, validates bounds, then splices the service from the `s
 
 | Export | Type | Description |
 |--------|------|-------------|
-| `default` | `express.Router()` | Router instance with 4 Service CRUD endpoints mounted at `/api/pcs/:pcId/services` via `server.js` |
+| `default` | `express.Router({ mergeParams: true })` | Router instance with 4 Service CRUD endpoints mounted at `/api/v1/pcs/:pcId/services` via `server.js` |
 
 ---
 
@@ -697,3 +704,7 @@ Deletes a user document by `_id`. Performs a preemptive `mongoose.Types.ObjectId
   - **`twoFactor.js`** — The duplicated `setAuthCookies()` helper receives the same fix: `sameSite` is `'Strict'` in production, `'Lax'` in development for both `accessToken` and `refreshToken`.
   - Rationale: `'Strict'` blocks all cross-site requests including those from an external dev proxy or HMR server. `'Lax'` allows the Vite dev server (on a different port) to send cookies while still protecting against CSRF on cross-origin POST/PUT/DELETE. Properly capitalized values (`'Strict'`, `'Lax'`) conform to current browser implementations (some browsers normalize lowercase, but explicit capitalization ensures compliance).
   - All three "Set both auth cookies" helper descriptions and the 2FA intercept cookie documentation have been updated accordingly.
+
+## 🔄 Changes in this update
+
+- **Services router `mergeParams` fix + versioned mount (`services.js`):** The router is now created with `express.Router({ mergeParams: true })` instead of a plain `express.Router()`. This is required because `services.js` is the only router in `server.js` whose mount contains a parameter — it is mounted at `/api/v1/pcs/:pcId/services` (`server.js:205`) — and Express 4 sub-routers do not merge the mount's `:pcId` parameter into `req.params` by default. Without `mergeParams: true`, `req.params.pcId` would be `undefined` in every handler. The `getPcId(req)` helper now simply returns `req.params.pcId` (previously it parsed `req.baseUrl` with a broken regex and fell back to `req.params.pcid`). Updated the `services.js` file description, added a `### Functions` section documenting `getPcId()`, and corrected the exports table to the versioned mount path `/api/v1/pcs/:pcId/services` with the `mergeParams: true` router type.

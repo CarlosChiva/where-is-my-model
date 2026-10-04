@@ -87,14 +87,16 @@ export function validatePcBody(req, res, next) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  extractPcId — helpers for routes mounted under /api/pcs/:pcId      */
-/*  When a sub-router is used, Express strips mount-point params       */
-/*  from req.params; we must extract pcId from req.baseUrl instead.    */
+/*  extractPcId — helper for routes mounted under /api/v1/pcs/:pcId    */
+/*  The services router (routes/services.js) is mounted at            */
+/*  `${API_PREFIX}/pcs/:pcId/services` and is created with            */
+/*  `mergeParams: true`, so the mount's `:pcId` param is merged into   */
+/*  req.params for every middleware in that router.                   */
 /* ------------------------------------------------------------------ */
 
 function extractPcId(req) {
-  const parts = req.baseUrl.match(/\/api\/pcs\/([^/]+)/);
-  return parts ? parts[1] : req.params.pciId || req.params[':pciId'] || null;
+  // mergeParams:true merges the mount's :pcId param into req.params.
+  return req.params.pcId;
 }
 
 /* ------------------------------------------------------------------ */
