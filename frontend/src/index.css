@@ -66,41 +66,6 @@
   color-scheme: light;
 }
 
-/* Fallback sin JS: si no hay data-theme forzado, el sistema light gana */
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme="dark"]) {
-    /* Tema claro "Azul sobre papel" */
-    --bg: 238 242 246;
-    --surface-dim: 227 234 241;
-    --surface: 255 255 255;
-    --line: 211 220 230;
-    --line-strong: 82 102 127;
-    --fg: 5 8 13;
-    --fg-2: 52 70 92;
-    --fg-3: 82 102 127;
-    --link: 0 102 204;
-    --link-hover: 0 68 170;
-    --btn-primary-bg: 0 102 204;
-    --btn-primary-fg: 255 255 255;
-    --btn-primary-hover-bg: 0 68 170;
-    --container: 220 235 250;
-    --on-container: 0 68 170;
-    --violet: 107 63 224;
-    --success: 24 112 0;
-    --info: 0 110 153;
-    --warn: 143 84 0;
-    --err: 200 30 69;
-    --deep-blue: 0 102 204;
-    --accent-dim: rgba(0, 102, 204, .12);
-    --shadow: 0 2px 12px rgba(0, 68, 170, .12);
-    --btn-glow: none;
-    --card-shadow: 0 2px 12px rgba(0, 68, 170, .12);
-    --focus: #0066CC;
-    --selection: rgba(0, 207, 255, .30);
-    color-scheme: light;
-  }
-}
-
 body { background: var(--bg); color: var(--fg); }
 ::selection { background: var(--selection); color: var(--fg); }
 h1, h2, h3, h4 { font-family: 'Chakra Petch', 'Segoe UI', sans-serif; text-wrap: balance; }

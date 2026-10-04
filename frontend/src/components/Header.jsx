@@ -1,3 +1,5 @@
+import ThemeToggle from './ThemeToggle.jsx';
+
 function Header({ pcs, currentPage = 'dashboard', onPageChange, isAdmin = false }) {
   const serverCount = pcs.length;
   const serviceCount = pcs.reduce(
@@ -13,6 +15,7 @@ function Header({ pcs, currentPage = 'dashboard', onPageChange, isAdmin = false 
 
   return (
     <header className="flex flex-col items-center gap-4">
+      <ThemeToggle />
       <div className="flex flex-col gap-2 text-center items-center">
         <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-text-primary">
           Where Is My Model

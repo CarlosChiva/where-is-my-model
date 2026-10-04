@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { isPasswordStrong, validatePasswordStrength } from '../utils/validators.js';
+import ThemeToggle from './ThemeToggle.jsx';
 
 export default function LoginPage() {
   const { login, register, isLoading } = useAuth();
@@ -54,6 +55,7 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen bg-bg-primary flex items-center justify-center px-4">
+      <ThemeToggle />
       {/* ── Card ─────────────────────────────────────────────── */}
       <div className="w-full max-w-md bg-bg-card rounded-lg shadow-card border border-border p-6 lg:p-8">
 
