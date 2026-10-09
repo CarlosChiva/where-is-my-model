@@ -7,18 +7,24 @@ import { useAuth }      from './context/AuthContext.jsx';
 import LoginPage        from './components/LoginPage.jsx';
 
 /* ── Custom Hooks ─────────────────────────────────────────── */
-import usePcs           from './hooks/usePcs.js';
-import useCreatePc      from './hooks/useCreatePc.js';
-import useUpdatePc      from './hooks/useUpdatePc.js';
-import useDeletePc      from './hooks/useDeletePc.js';
-import useCreateService from './hooks/useCreateService.js';
-import useUpdateService from './hooks/useUpdateService.js';
-import useDeleteService from './hooks/useDeleteService.js';
-import useServiceHealth from './hooks/useServiceHealth.js';
+import usePcs            from './hooks/usePcs.js';
+import useCreatePc       from './hooks/useCreatePc.js';
+import useUpdatePc       from './hooks/useUpdatePc.js';
+import useDeletePc       from './hooks/useDeletePc.js';
+import useCreateService  from './hooks/useCreateService.js';
+import useUpdateService  from './hooks/useUpdateService.js';
+import useDeleteService  from './hooks/useDeleteService.js';
+import useServiceHealth  from './hooks/useServiceHealth.js';
+import useDns            from './hooks/useDns.js';
+import useDnsHealth      from './hooks/useDnsHealth.js';
+import useCreateDnsEntry from './hooks/useCreateDnsEntry.js';
+import useUpdateDnsEntry from './hooks/useUpdateDnsEntry.js';
+import useDeleteDnsEntry from './hooks/useDeleteDnsEntry.js';
 
 /* ── UI Components ─────────────────────────────────────────── */
 import Header               from './components/Header.jsx';
 import PCGrid               from './components/PCGrid.jsx';
+import DnsCard              from './components/DnsCard.jsx';
 import GPUCalculatorPage    from './components/GpuCalculator/GPUCalculatorPage.jsx';
 import AdminPanel           from './components/AdminPanel.jsx';
 
@@ -27,6 +33,8 @@ import EditPcModal          from './components/Modals/EditPcModal.jsx';
 import AddServiceModal      from './components/Modals/AddServiceModal.jsx';
 import EditServiceModal     from './components/Modals/EditServiceModal.jsx';
 import DeleteConfirmModal   from './components/Modals/DeleteConfirmModal.jsx';
+import AddDnsEntryModal     from './components/Modals/AddDnsEntryModal.jsx';
+import EditDnsEntryModal    from './components/Modals/EditDnsEntryModal.jsx';
 
 export default function App() {
   /* ── Auth hooks — must fire before any data hooks ─────────── */
@@ -46,6 +54,13 @@ export default function App() {
 
   /* ── Health check hook — per-service TCP status manager ─── */
   const serviceHealth      = useServiceHealth();
+
+  /* ── DNS hooks — card data, health, and mutations ─────────── */
+  const { data: dnsCard, loading: dnsLoading, error: dnsError, refetch: refetchDns } = useDns();
+  const dnsHealth          = useDnsHealth();
+  const createDnsEntryHook = useCreateDnsEntry({ onSuccess: refetchDns });
+  const updateDnsEntryHook = useUpdateDnsEntry({ onSuccess: refetchDns });
+  const deleteDnsEntryHook = useDeleteDnsEntry({ onSuccess: refetchDns });
 
   /* ── 1. Post-auth refetch (auth-change only) ────────────────── */
   useEffect(() => {
@@ -186,6 +201,50 @@ export default function App() {
       }
     : () => {};
 
+  /* DNS — Open AddDnsEntryModal (gated: admin only) */
+  const handleOpenAddDnsEntry = isAdmin
+    ? () => setModalState({ type: 'addDnsEntry', payload: null })
+    : () => {};
+
+  /* DNS — Open EditDnsEntryModal with existing entry data (gated: admin only) */
+  const handleEditDnsEntry = isAdmin
+    ? (entry) => {
+        setModalState({
+          type: 'editDnsEntry',
+          payload: { entry },
+        });
+      }
+    : () => {};
+
+  /* DNS — Persist new entry via mutation hook, close modal; refetch fires on success */
+  const handleAddDnsEntry = async (values) => {
+    const result = await createDnsEntryHook.mutate(values);
+    if (!result?.error) {
+      closeModal();
+    }
+  };
+
+  /* DNS — Submit handler called by EditDnsEntryModal.onSave (gated: admin only) */
+  const handleEditDnsEntrySubmit = isAdmin
+    ? async (payload) => {
+        const { entryId, ...data } = payload;
+        const result = await updateDnsEntryHook.mutate({ entryId, data });
+        if (!result?.error) {
+          closeModal();
+        }
+      }
+    : () => {};
+
+  /* DNS — Open DeleteConfirmModal with actionType: 'dnsEntry' (gated: admin only) */
+  const handleDeleteDnsEntry = isAdmin
+    ? (entry) => {
+        setModalState({
+          type: 'deleteConfirm',
+          payload: { entryId: entry._id, name: entry.name, actionType: 'dnsEntry' },
+        });
+      }
+    : () => {};
+
   /*
    * Confirmation handler for delete modals.
    * Dispatches based on modalState.payload.actionType:
@@ -195,12 +254,14 @@ export default function App() {
    */
   const handleConfirmDelete = isAdmin
     ? async () => {
-        const { actionType, pcId, index } = modalState.payload || {};
+        const { actionType, pcId, index, entryId } = modalState.payload || {};
         let result;
         if (actionType === 'pc') {
           result = await deletePcHook.mutate(pcId);
         } else if (actionType === 'service') {
           result = await deleteServiceHook.mutate({ pcId, index });
+        } else if (actionType === 'dnsEntry') {
+          result = await deleteDnsEntryHook.mutate(entryId);
         }
         if (!result?.error) {
           closeModal();
@@ -212,7 +273,9 @@ export default function App() {
   const deleteMessage = modalState.payload
     ? (modalState.payload.actionType === 'pc'
         ? `Delete server '${modalState.payload.nombre}'? This cannot be undone.`
-        : 'Delete this service? This cannot be undone.')
+        : modalState.payload.actionType === 'dnsEntry'
+          ? `Delete DNS entry '${modalState.payload.name}'? This cannot be undone.`
+          : 'Delete this service? This cannot be undone.')
     : '';
 
   /*
@@ -249,10 +312,23 @@ export default function App() {
             onDeletePc={handleDeletePc}
             onEditService={handleEditService}
             onDeleteService={handleDeleteService}
-          />
+           />
 
-          {/*
-           * ── Modal Routing — Phase 5 Integration ────────────────
+           {/* DNS card: DNS resolution entries with health checks */}
+           <DnsCard
+             card={dnsCard}
+             loading={dnsLoading}
+             error={dnsError}
+             health={dnsHealth}
+             isAdmin={isAdmin}
+             onAdd={handleOpenAddDnsEntry}
+             onEdit={handleEditDnsEntry}
+             onDelete={handleDeleteDnsEntry}
+             onCheckHealth={() => dnsHealth.checkAll((dnsCard?.entries ?? []).map(e => ({ entryId: e._id })))}
+           />
+
+           {/*
+            * ── Modal Routing — Phase 5 Integration ────────────────
            * Conditional rendering based on modalState.type.
            * Each case passes payload as data props and callbacks for save/close.
            */}
@@ -300,15 +376,34 @@ export default function App() {
               error={updateServiceHook.error}
               clearError={updateServiceHook.clearError}
             />
-          )}
-          {modalState.type === 'deleteConfirm' && (
+           )}
+           {modalState.type === 'addDnsEntry' && (
+             <AddDnsEntryModal
+               onSave={handleAddDnsEntry}
+               onClose={closeModal}
+               loading={createDnsEntryHook.loading}
+               error={createDnsEntryHook.error}
+               clearError={createDnsEntryHook.clearError}
+             />
+           )}
+           {modalState.type === 'editDnsEntry' && (
+             <EditDnsEntryModal
+               entry={modalState.payload.entry}
+               onSave={handleEditDnsEntrySubmit}
+               onCancel={closeModal}
+               loading={updateDnsEntryHook.loading}
+               error={updateDnsEntryHook.error}
+               clearError={updateDnsEntryHook.clearError}
+             />
+           )}
+           {modalState.type === 'deleteConfirm' && (
             <DeleteConfirmModal
               isOpen={true}
               message={deleteMessage}
               onConfirm={handleConfirmDelete}
               onCancel={closeModal}
-              loading={modalState.payload?.actionType === 'pc' ? deletePcHook.loading : deleteServiceHook.loading}
-              error={modalState.payload?.actionType === 'pc' ? deletePcHook.error : deleteServiceHook.error}
+               loading={modalState.payload?.actionType === 'pc' ? deletePcHook.loading : modalState.payload?.actionType === 'dnsEntry' ? deleteDnsEntryHook.loading : deleteServiceHook.loading}
+               error={modalState.payload?.actionType === 'pc' ? deletePcHook.error : modalState.payload?.actionType === 'dnsEntry' ? deleteDnsEntryHook.error : deleteServiceHook.error}
             />
           )}
         </>

@@ -201,6 +201,17 @@ async function registerRoutes() {
   }
 
   try {
+    const dnsModule = await import('./routes/dns.js');
+    app.use(`${API_PREFIX}/dns`, dnsModule.default);
+    logger.info(`DNS router registered at ${API_PREFIX}/dns`);
+  } catch {
+    logger.warn(
+      `DNS router not found — ` +
+      `${API_PREFIX}/dns endpoints unavailable (create routes/dns.js)`
+    );
+  }
+
+  try {
     const servicesModule = await import('./routes/services.js');
     app.use(`${API_PREFIX}/pcs/:pcId/services`, servicesModule.default);
     logger.info(`Services router registered at ${API_PREFIX}/pcs/:pcId/services`);

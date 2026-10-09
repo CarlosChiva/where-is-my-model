@@ -1,5 +1,7 @@
 import net from 'net';
-import { resolveAndValidate } from '../middleware/ssrfProtection.js';
+import dns from 'node:dns/promises';
+import { performance } from 'node:perf_hooks';
+import { resolveAndValidate, validateDnsResolver } from '../middleware/ssrfProtection.js';
 import logger from '../utils/logger.js';
 
 /* ------------------------------------------------------------------ */
@@ -85,6 +87,64 @@ function checkServiceStatus(host, port, endpoint, protocol) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  checkDnsEntry — real DNS query against a specific resolver        */
+/*  Resolves the resolver host via validateDnsResolver (SSRF guard),  */
+/*  then issues an A or AAAA lookup for probeDomain using a dedicated */
+/*  dns.Resolver pointed at the validated IP:port. The query is       */
+/*  raced against a timeout (default 5000 ms).                        */
+/*  Returns { status: 'up'|'down', reason?, latencyMs }.              */
+/* ------------------------------------------------------------------ */
+
+async function checkDnsEntry({ host, port, probeDomain, type, timeoutMs = 5000 }) {
+  /* Step 1 — SSRF guard: resolve + validate the resolver host */
+  const { allowed, ip } = await validateDnsResolver(host);
+  if (!allowed) {
+    logger.warn(`[health] dns: host="${host}" ssrf-blocked`);
+    return { status: 'down', reason: 'ssrf-blocked', latencyMs: 0 };
+  }
+
+  /* Step 2 — Configure a dedicated resolver (anti-rebinding: use  */
+  /* the validated IP, never the original hostname)                */
+  const resolver = new dns.Resolver();
+  const server = port === 53 ? ip : `${ip}:${port}`;
+  resolver.setServers([server]);
+
+  /* Step 3 — Build the query (AAAA → resolve6, otherwise resolve4) */
+  const query = type === 'AAAA' ? resolver.resolve6(probeDomain) : resolver.resolve4(probeDomain);
+
+  /* Step 4 — Race the query against a timeout (dns.Resolver has   */
+  /* no per-query timeout built-in)                                 */
+  const start = performance.now();
+  let timerId;
+  const timeoutPromise = new Promise((_, reject) => {
+    timerId = setTimeout(() => reject(new Error('dns-timeout')), timeoutMs);
+  });
+
+  try {
+    await Promise.race([query, timeoutPromise]);
+    clearTimeout(timerId);
+    const latencyMs = Math.round(performance.now() - start);
+    return { status: 'up', latencyMs };
+  } catch (err) {
+    clearTimeout(timerId);
+    const latencyMs = Math.round(performance.now() - start);
+
+    if (err.message === 'dns-timeout') {
+      logger.warn(`[health] dns: host="${host}" probe="${probeDomain}" timeout after ${timeoutMs}ms`);
+      return { status: 'down', reason: 'timeout', latencyMs };
+    }
+
+    if (err.code === 'ENOTFOUND' || err.code === 'ENODATA') {
+      logger.warn(`[health] dns: host="${host}" probe="${probeDomain}" ${err.code}`);
+      return { status: 'down', reason: 'nxdomain', latencyMs };
+    }
+
+    logger.warn(`[health] dns: host="${host}" probe="${probeDomain}" ${err.code ?? err.message}`);
+    return { status: 'down', reason: 'error', latencyMs };
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /*  checkPcServices — iterate embedded servicios on a single PC       */
 /*  Uses the PC-level `ip` as the TCP host (services currently have   */
 /*  no per-service `host` field in the schema). Services that lack    */
@@ -165,4 +225,4 @@ function checkAllServices(pcsArray) {
 /*  Exports                                                           */
 /* ------------------------------------------------------------------ */
 
-export { checkHttpEndpoint, checkServiceStatus, checkPcServices, checkAllServices };
+export { checkHttpEndpoint, checkServiceStatus, checkDnsEntry, checkPcServices, checkAllServices };
