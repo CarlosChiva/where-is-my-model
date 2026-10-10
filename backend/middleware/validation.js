@@ -1,4 +1,5 @@
 import PC from '../models/PC.js';
+import { validateDnsResolver } from './ssrfProtection.js';
 
 /* ------------------------------------------------------------------ */
 /*  Helper: format a single validation error message                   */
@@ -349,6 +350,161 @@ export async function validateServiceUpdate(req, res, next) {
   /* --- Store resolved assignedGpu on req for the route handler ---- */
   if (rawAssignedGpu !== undefined) {
     req.body.assignedGpu = rawAssignedGpu;
+  }
+
+  /* --- response ------------------------------------------------ */
+  if (errors.length > 0) {
+    return res.status(400).json({ success: false, errors });
+  }
+
+  next();
+}
+
+/* ------------------------------------------------------------------ */
+/*  validateDnsEntry                                                   */
+/*  Used on: POST /api/v1/dns/entries                                  */
+/*  Full validation for a new DNS entry.                                */
+/*  Checks name (non-empty), host (non-empty, broad: accepts IPv4,     */
+/*  IPv6 literal or hostname), port (integer 1–65535, default 53),    */
+/*  probeDomain (non-empty string, default 'example.com'),             */
+/*  type (enum A|AAAA, default 'A').                                   */
+/*  Applies defaults to req.body so the route can push(req.body).     */
+/*  Async: `host` (when non-empty) is validated via validateDnsResolver*/
+/*  (SSRF guard — same behaviour as checkDnsEntry in healthChecker). */
+/* ------------------------------------------------------------------ */
+
+export async function validateDnsEntry(req, res, next) {
+  const errors = [];
+
+  /* ---.name ------------------------------------------------------ */
+  const name = req.body.name;
+  if (typeof name !== 'string' || name.trim() === '') {
+    errors.push(fieldError('name', 'Entry name is required and must be a non-empty string.'));
+  }
+
+  /* ---.host ------------------------------------------------------ */
+  const host = req.body.host;
+  if (typeof host !== 'string' || host.trim() === '') {
+    errors.push(fieldError('host', 'Host is required and must be a non-empty string.'));
+  }
+
+  /* ---.port ------------------------------------------------------ */
+  if (req.body.port !== undefined) {
+    const port = req.body.port;
+    if (typeof port !== 'number' || Number.isNaN(port) || !Number.isInteger(port)) {
+      errors.push(fieldError('port', 'Port must be an integer.'));
+    } else if (port < 1 || port > 65535) {
+      errors.push(fieldError('port', 'Port must be between 1 and 65535.'));
+    }
+  } else {
+    req.body.port = 53;
+  }
+
+  /* ---.probeDomain ----------------------------------------------- */
+  if (req.body.probeDomain !== undefined) {
+    const probeDomain = req.body.probeDomain;
+    if (typeof probeDomain !== 'string' || probeDomain.trim() === '') {
+      errors.push(fieldError('probeDomain', 'Probe domain must be a non-empty string.'));
+    }
+  } else {
+    req.body.probeDomain = 'example.com';
+  }
+
+  /* ---.type ------------------------------------------------------ */
+  if (req.body.type !== undefined) {
+    const type = req.body.type;
+    if (type !== 'A' && type !== 'AAAA') {
+      errors.push(fieldError('type', 'Type must be either "A" or "AAAA".'));
+    }
+  } else {
+    req.body.type = 'A';
+  }
+
+  /* --- SSRF guard on host (validateDnsResolver) ----------------- */
+  if (typeof host === 'string' && host.trim() !== '') {
+    let ssrf;
+    try {
+      ssrf = await validateDnsResolver(host);
+    } catch (_) {
+      return res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+    if (!ssrf.allowed) {
+      errors.push(fieldError('host', ssrf.reason ?? 'ssrf-blocked'));
+    }
+  }
+
+  /* --- response ------------------------------------------------ */
+  if (errors.length > 0) {
+    return res.status(400).json({ success: false, errors });
+  }
+
+  next();
+}
+
+/* ------------------------------------------------------------------ */
+/*  validateDnsEntryUpdate                                             */
+/*  Used on: PUT /api/v1/dns/entries/:entryId                          */
+/*  Partial validation: only validates fields present in the body.     */
+/*  name/host are NOT required here — only validated if present.       */
+/*  No defaults are forced; the route merges only the provided fields. */
+/*  Async: `host` (when present and non-empty in body) is validated   */
+/*  via validateDnsResolver (SSRF guard, same as validateDnsEntry).   */
+/* ------------------------------------------------------------------ */
+
+export async function validateDnsEntryUpdate(req, res, next) {
+  const errors = [];
+
+  /* ---.name (only if present) ----------------------------------- */
+  if (req.body.name !== undefined) {
+    if (typeof req.body.name !== 'string' || req.body.name.trim() === '') {
+      errors.push(fieldError('name', 'Entry name must be a non-empty string.'));
+    }
+  }
+
+  /* ---.host (only if present) ----------------------------------- */
+  if (req.body.host !== undefined) {
+    if (typeof req.body.host !== 'string' || req.body.host.trim() === '') {
+      errors.push(fieldError('host', 'Host must be a non-empty string.'));
+    }
+  }
+
+  /* ---.port (only if present) ----------------------------------- */
+  if (req.body.port !== undefined) {
+    const port = req.body.port;
+    if (typeof port !== 'number' || Number.isNaN(port) || !Number.isInteger(port)) {
+      errors.push(fieldError('port', 'Port must be an integer.'));
+    } else if (port < 1 || port > 65535) {
+      errors.push(fieldError('port', 'Port must be between 1 and 65535.'));
+    }
+  }
+
+  /* ---.probeDomain (only if present) ---------------------------- */
+  if (req.body.probeDomain !== undefined) {
+    if (typeof req.body.probeDomain !== 'string' || req.body.probeDomain.trim() === '') {
+      errors.push(fieldError('probeDomain', 'Probe domain must be a non-empty string.'));
+    }
+  }
+
+  /* ---.type (only if present) ----------------------------------- */
+  if (req.body.type !== undefined) {
+    const type = req.body.type;
+    if (type !== 'A' && type !== 'AAAA') {
+      errors.push(fieldError('type', 'Type must be either "A" or "AAAA".'));
+    }
+  }
+
+  /* --- SSRF guard on host (validateDnsResolver) ----------------- */
+  const host = req.body.host;
+  if (typeof host === 'string' && host.trim() !== '') {
+    let ssrf;
+    try {
+      ssrf = await validateDnsResolver(host);
+    } catch (_) {
+      return res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+    if (!ssrf.allowed) {
+      errors.push(fieldError('host', ssrf.reason ?? 'ssrf-blocked'));
+    }
   }
 
   /* --- response ------------------------------------------------ */

@@ -109,6 +109,60 @@ export function validateServiceForm(data, services, gpus) {
   return { valid: Object.keys(errors).length === 0, errors };
 }
 
+/**
+ * validateDnsEntryForm — Validate a DNS entry form data object.
+ * Returns { valid: boolean, errors: { name?, host?, port?, probeDomain?, type? } }
+ *
+ * @param {Object} values  - Form values ({ name, host, port, probeDomain, type })
+ * @param {Object} [options]
+ * @param {string} [options.mode='create'] - 'create' or 'edit'.
+ *                                           In edit mode, name/host are
+ *                                           optional (partial PUT).
+ */
+export function validateDnsEntryForm(values, { mode = 'create' } = {}) {
+  const errors = {};
+  const { name, host, port, probeDomain, type } = values || {};
+  const isEdit = mode === 'edit';
+
+  /* ── name ────────────────────────────────────────────── */
+  if (!isEdit || name !== undefined) {
+    if (name === undefined || name === null || typeof name !== 'string' || !name.trim()) {
+      errors.name = 'Name is required.';
+    }
+  }
+
+  /* ── host (broad: IPv4, IPv6 literal, or hostname) ───── */
+  if (!isEdit || host !== undefined) {
+    if (host === undefined || host === null || typeof host !== 'string' || !host.trim()) {
+      errors.host = 'Host is required.';
+    }
+  }
+
+  /* ── port (optional, default 53) ─────────────────────── */
+  if (port !== undefined && port !== null && port !== '') {
+    const portNum = Number(port);
+    if (isNaN(portNum) || !Number.isInteger(portNum) || portNum < 1 || portNum > 65535) {
+      errors.port = 'Port must be an integer between 1 and 65535.';
+    }
+  }
+
+  /* ── probeDomain (optional, default example.com) ─────── */
+  if (probeDomain !== undefined && probeDomain !== null && probeDomain !== '') {
+    if (typeof probeDomain !== 'string' || !probeDomain.trim()) {
+      errors.probeDomain = 'Probe domain must not be empty.';
+    }
+  }
+
+  /* ── type (optional, default 'A') ────────────────────── */
+  if (type !== undefined && type !== null && type !== '') {
+    if (type !== 'A' && type !== 'AAAA') {
+      errors.type = 'Type must be "A" or "AAAA".';
+    }
+  }
+
+  return { valid: Object.keys(errors).length === 0, errors };
+}
+
 /* ------------------------------------------------------------------ */
 /*  Password strength validation                                      */
 /* ------------------------------------------------------------------ */
