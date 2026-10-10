@@ -62,12 +62,13 @@ export default function App() {
   const updateDnsEntryHook = useUpdateDnsEntry({ onSuccess: refetchDns });
   const deleteDnsEntryHook = useDeleteDnsEntry({ onSuccess: refetchDns });
 
-  /* ── 1. Post-auth refetch (auth-change only) ────────────────── */
+  /* ── 1. Post-auth load (PCs + DNS) ─────────────────────────── */
   useEffect(() => {
     if (isAuthenticated && !isLoading) {
       refetch();
+      refetchDns();
     }
-  }, [isAuthenticated, isLoading, refetch]);
+  }, [isAuthenticated, isLoading, refetch, refetchDns]);
 
   /* ── 2. Initial health check (runs once after pcs load) ─────── */
   const healthCheckedRef = useRef(false);
@@ -81,6 +82,18 @@ export default function App() {
       serviceHealth.checkAll(ids);
     }
   }, [isAuthenticated, pcs, serviceHealth]);
+
+  /* ── 3. Initial DNS health check (runs once after dnsCard loads) ── */
+  const dnsHealthCheckedRef = useRef(false);
+
+  useEffect(() => {
+    if (dnsHealthCheckedRef.current) return;
+    if (!isAuthenticated || !dnsCard || (dnsCard.entries ?? []).length === 0) return;
+    dnsHealthCheckedRef.current = true;
+    if (dnsHealth.checkAll) {
+      dnsHealth.checkAll(dnsCard.entries.map(e => ({ entryId: e._id })));
+    }
+  }, [isAuthenticated, dnsCard, dnsHealth]);
 
   /*
    * State: Modal router — single object pattern.
