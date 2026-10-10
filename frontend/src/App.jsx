@@ -315,17 +315,19 @@ export default function App() {
            />
 
            {/* DNS card: DNS resolution entries with health checks */}
-           <DnsCard
-             card={dnsCard}
-             loading={dnsLoading}
-             error={dnsError}
-             health={dnsHealth}
-             isAdmin={isAdmin}
-             onAdd={handleOpenAddDnsEntry}
-             onEdit={handleEditDnsEntry}
-             onDelete={handleDeleteDnsEntry}
-             onCheckHealth={() => dnsHealth.checkAll((dnsCard?.entries ?? []).map(e => ({ entryId: e._id })))}
-           />
+            <div className="mt-8 md:mt-10 max-w-2xl mx-auto">
+              <DnsCard
+                card={dnsCard}
+                loading={dnsLoading}
+                error={dnsError}
+                health={dnsHealth}
+                isAdmin={isAdmin}
+                onAdd={handleOpenAddDnsEntry}
+                onEdit={handleEditDnsEntry}
+                onDelete={handleDeleteDnsEntry}
+                onCheckHealth={() => dnsHealth.checkAll((dnsCard?.entries ?? []).map(e => ({ entryId: e._id })))}
+              />
+            </div>
 
            {/*
             * ── Modal Routing — Phase 5 Integration ────────────────

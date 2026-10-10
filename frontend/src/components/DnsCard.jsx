@@ -33,23 +33,45 @@ export default function DnsCard({
   const checking = health?.anyLoading?.() ?? false;
 
   return (
-    <div className="bg-bg-card rounded-lg shadow-card hover:shadow-card-hover hover:-translate-y-1 transition-all duration-300 border border-border animate-card-enter">
+    <div className="bg-bg-card rounded-lg shadow-card hover:shadow-card-hover hover:-translate-y-1 transition-all duration-300 border border-violet-500/30 animate-card-enter overflow-hidden">
+      {/* ── Violet top accent bar ── */}
+      <div className="h-1 bg-violet-500" />
+
       {/* ── Header: title + entry count ── */}
-      <div className="flex justify-between items-center p-4 pb-2 border-b border-border">
-        <h2 className="text-lg font-bold text-text-primary">Resolvers DNS</h2>
-        <span className="inline-block bg-bg-input px-2 py-1 rounded text-sm font-mono text-text-secondary">
+      <div className="flex justify-between items-center px-5 py-4 border-b border-violet-500/20">
+        <div className="flex items-center gap-2">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="text-violet-400"
+            aria-hidden="true"
+          >
+            <circle cx="12" cy="12" r="10" />
+            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+            <path d="M2 12h20" />
+          </svg>
+          <h2 className="text-lg font-bold text-text-primary">Resolvers DNS</h2>
+        </div>
+        <span className="inline-block bg-violet-500/15 px-2 py-1 rounded text-sm font-mono text-violet-300">
           {entries.length}
         </span>
       </div>
 
       {/* ── Body: loading / error / empty / rows ── */}
-      <div className="px-4 py-2">
+      <div className="px-5 py-4">
         {loading ? (
           <p className="text-sm text-text-secondary animate-pulse">Loading DNS resolvers...</p>
         ) : error ? (
           <p className="text-sm text-text-muted">{error}</p>
         ) : entries.length === 0 ? (
-          <div className="text-center py-6 text-text-secondary">
+          <div className="text-center py-8 text-text-secondary">
             <p className="text-lg">No DNS resolvers configured.</p>
             {isAdmin && (
               <p className="text-sm mt-2 text-text-muted">Use the + button to add your first resolver.</p>
@@ -71,7 +93,7 @@ export default function DnsCard({
       </div>
 
       {/* ── Action buttons ── */}
-      <div className="flex gap-2 p-4 pt-2 border-t border-border">
+      <div className="flex gap-2 px-5 py-4 border-t border-violet-500/20">
         <button
           type="button"
           className="border border-text-secondary text-text-secondary p-2 rounded-md hover:bg-bg-input transition-colors disabled:opacity-50"
@@ -102,7 +124,7 @@ export default function DnsCard({
         {isAdmin && (
           <button
             type="button"
-            className="border border-accent text-accent px-3 py-2 rounded-md hover:bg-accent-dim transition-colors flex-1"
+            className="border border-violet-500 text-violet-400 px-3 py-2 rounded-md hover:bg-violet-500/10 transition-colors flex-1"
             aria-label="Add DNS resolver"
             onClick={() => onAdd?.()}
           >

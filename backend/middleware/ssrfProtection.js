@@ -91,11 +91,8 @@ export function validateIp(ip) {
     let parsed = ipaddr.parse(ip);
 
     /* --- Step 1: normalize to IPv4 when mapping is safe ----------- */
-    if (parsed.kind() === 'ipv6') {
-      const mapped = parsed.toIPv4Fallback();
-      if (mapped) {
-        parsed = ipaddr.parse(mapped);
-      }
+    if (parsed.kind() === 'ipv6' && parsed.isIPv4MappedAddress()) {
+      parsed = parsed.toIPv4Address();
     }
 
     /* --- Step 2: optional allowlist (explicit bypass of denylist) */
@@ -115,7 +112,9 @@ export function validateIp(ip) {
     /* --- Step 3: hard denylist check (non-allowlisted IPs only)  */
     for (const cidr of BLOCKED_RANGES) {
       const [addr, prefix] = cidr.split('/');
-      if (parsed.match([ipaddr.parse(addr), Number.parseInt(prefix, 10)])) {
+      const range = ipaddr.parse(addr);
+      if (range.kind() !== parsed.kind()) continue;
+      if (parsed.match([range, Number.parseInt(prefix, 10)])) {
         return { allowed: false, reason: `denied by block range ${cidr}` };
       }
     }
